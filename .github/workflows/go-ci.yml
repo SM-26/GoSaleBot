@@ -15,6 +15,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set Go Proxy to direct
+        run: echo "GOPROXY=direct" >> $HOME/.bashrc  
+
+      - name: Install ca-certificates
+        run: |
+          apt-get update && \
+          apt-get install -y ca-certificates
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
