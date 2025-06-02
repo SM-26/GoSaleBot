@@ -1,0 +1,14 @@
+version: '3.8'
+services:
+  telegram-bot:
+    build: .
+    container_name: telegram-bot
+    environment:
+      # Uncomment and set your Telegram token here or use a .env file
+      # TELEGRAM_TOKEN: your_token_here
+    # If your bot needs to expose a port, add it here (example: 8080)
+    # ports:
+    #   - "8080:8080"
+    restart: unless-stopped
+    # volumes:
+    #   - ./config.yaml:/app/config.yaml
