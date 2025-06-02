@@ -10,6 +10,9 @@ COPY . .
 # Download and install any needed dependencies
 RUN go mod download
 
+# Install SQLite dependency for Go
+RUN apk add --no-cache sqlite
+
 # Build the Go app
 RUN go build -o bot
 
@@ -27,6 +30,10 @@ COPY --from=builder /app/bot ./bot
 
 # Set environment variables if needed
 # ENV TELEGRAM_TOKEN=your_token_here
+ENV MODERATION_GROUP_ID=${MODERATION_GROUP_ID}
+ENV APPROVED_GROUP_ID=${APPROVED_GROUP_ID}
+ENV TIMEOUT_MINUTES=${TIMEOUT_MINUTES}
+ENV LANG=${LANG}
 
 # Command to run your app (replace with your actual entrypoint)
 CMD ["./bot"]
