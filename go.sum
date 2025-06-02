@@ -1,0 +1,4 @@
+github.com/matterbridge/telegram-bot-api/v6 v6.5.0 h1:wCnHWvt4WGhfognQsuu2OnHyqENBdJRf2mReYTCXggQ=
+github.com/matterbridge/telegram-bot-api/v6 v6.5.0/go.mod h1:/hSLrs8h/xNsQglQXjwXJ92iZU8XfTGkYUQ7KVDWEVo=
+github.com/mattn/go-sqlite3 v1.14.28 h1:ThEiQrnbtumT+QMknw63Befp/ce/nUPgBPMlRFEum7A=
+github.com/mattn/go-sqlite3 v1.14.28/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=

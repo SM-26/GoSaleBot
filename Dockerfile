@@ -1,5 +1,8 @@
 # Build stage
-FROM golang:1.22-alpine AS builder
+FROM golang:1.24.3-alpine AS builder
+
+# Update apk and upgrade packages to reduce vulnerabilities
+RUN apk update && apk upgrade --no-cache
 
 # Set the working directory
 WORKDIR /app

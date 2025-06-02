@@ -14,7 +14,7 @@ This project follows [Semantic Versioning 2.0.0](https://semver.org/):
 
 ## Version History
 
-- 0.1.0 – Initial public release with FSM, moderation, admin, i18n, Docker, and docs
+- 0.1.0 – Initial private release with FSM, moderation, admin, i18n, Docker, and docs
 
 ## How to update
 

@@ -16,6 +16,8 @@ Welcome to the GoSaleBot documentation! This folder provides technical and opera
      - `TELEGRAM_TOKEN` – Your Telegram bot token
      - `MODERATION_GROUP_ID` – Telegram group ID for moderation
      - `APPROVED_GROUP_ID` – Telegram group ID for approved posts
+     - `MODERATION_TOPIC_ID` – (optional) Topic/thread ID for moderation group
+     - `APPROVED_TOPIC_ID` – (optional) Topic/thread ID for approved group
      - `LANG` – Default language (en/cz/he)
      - `TIMEOUT_MINUTES` – Post expiration timeout (default: 1440)
 3. **Build and run with Docker Compose:**

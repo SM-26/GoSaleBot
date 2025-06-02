@@ -3,11 +3,12 @@ package bot
 import (
 	"database/sql"
 	"fmt"
-	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/matterbridge/telegram-bot-api/v6"
 	"gosalebot/db"
 	"gosalebot/fsm"
 	"gosalebot/i18n"
 	"log"
+	"strconv"
 	"strings"
 )
 
@@ -70,11 +71,24 @@ func HandleMessageWithDB(dbConn *sql.DB, userID int64, text string, bot *tgbotap
 			preview := fmt.Sprintf("New Sale Post:\nTitle: %s\nDescription: %s\nPrice: %s\nLocation: %s\nStatus: pending",
 				session.PostData["title"], session.PostData["description"], session.PostData["price"], session.PostData["location"])
 			modMsg := tgbotapi.NewMessage(moderationGroupID, preview)
+			// If a topic ID is provided in config, set it
+			topicIDStr, err := db.GetConfig(dbConn, "MODERATION_TOPIC_ID")
+			var topicID int
+			if err == nil && topicIDStr != "" {
+				topicID, err = strconv.Atoi(topicIDStr)
+				if err == nil {
+					modMsg.MessageThreadID = topicID
+				}
+			}
 			_, err = bot.Send(modMsg)
 			if photos, ok := session.PostData["photos"].([]string); ok && len(photos) > 0 {
 				for _, fileID := range photos {
 					photoMsg := tgbotapi.NewPhoto(moderationGroupID, tgbotapi.FileID(fileID))
 					photoMsg.Caption = "Photo for post ID: " + fmt.Sprint(postID)
+					// Set topic if available
+					if err == nil && topicIDStr != "" {
+						photoMsg.MessageThreadID = int(topicID)
+					}
 					_, _ = bot.Send(photoMsg)
 				}
 			}
@@ -114,6 +128,14 @@ func ApprovePost(dbConn *sql.DB, bot *tgbotapi.BotAPI, moderationMsg *tgbotapi.M
 	}
 	// Forward post to approved group
 	msg := tgbotapi.NewMessage(approvedGroupID, moderationMsg.Text+"\nStatus: approved")
+	// If a topic ID is provided in config, set it
+	topicIDStr, err := db.GetConfig(dbConn, "APPROVED_TOPIC_ID")
+	if err == nil && topicIDStr != "" {
+		topicID, err := strconv.Atoi(topicIDStr)
+		if err == nil {
+			msg.MessageThreadID = topicID
+		}
+	}
 	_, err = bot.Send(msg)
 	if err != nil {
 		log.Printf("[ERROR] ApprovePost: failed to send approved post: %v", err)
@@ -121,6 +143,7 @@ func ApprovePost(dbConn *sql.DB, bot *tgbotapi.BotAPI, moderationMsg *tgbotapi.M
 	}
 	// Forward photos
 	rows, err := dbConn.Query("SELECT file_id FROM photos WHERE post_id = ?", postID)
+	var topicID int
 	if err != nil {
 		log.Printf("[ERROR] ApprovePost: failed to query photos: %v", err)
 	} else {
@@ -130,6 +153,13 @@ func ApprovePost(dbConn *sql.DB, bot *tgbotapi.BotAPI, moderationMsg *tgbotapi.M
 			if err := rows.Scan(&fileID); err == nil {
 				photoMsg := tgbotapi.NewPhoto(approvedGroupID, tgbotapi.FileID(fileID))
 				photoMsg.Caption = "Approved post photo"
+				// Set topic if available
+				if topicIDStr != "" {
+					if topicID == 0 {
+						topicID, _ = strconv.Atoi(topicIDStr)
+					}
+					photoMsg.MessageThreadID = int(topicID)
+				}
 				_, sendErr := bot.Send(photoMsg)
 				if sendErr != nil {
 					log.Printf("[ERROR] ApprovePost: failed to send photo: %v", sendErr)

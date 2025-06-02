@@ -1,5 +1,8 @@
 package i18n
 
+import (
+    "fmt"
+)
 var Messages = map[string]map[string]string{
 	"en": {
 		"welcome": "Welcome! Let's create a sale post. Please enter the title:",

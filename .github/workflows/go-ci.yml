@@ -8,7 +8,9 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: debian-latest
+    runs-on: ubuntu-latest
+    container:
+      image: debian:latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -17,6 +19,11 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+
+      - name: Install build dependencies
+        run: |
+          apt-get update && \
+          apt-get install -y build-essential git curl
 
       - name: Cache Go modules
         uses: actions/cache@v4
@@ -41,3 +48,4 @@ jobs:
         uses: dominikh/staticcheck-action@v1
         with:
           version: latest
+

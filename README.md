@@ -52,3 +52,13 @@ The bot will guide you through creating a sale post, which will be sent for mode
 ## License
 
 This project is licensed under the Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0) License. See the [LICENSE](LICENSE) file for details.
+
+---
+
+## Environment Variables
+
+- `TELEGRAM_TOKEN` – Your Telegram bot token
+- `ADMIN_CHAT_ID` – Your Telegram user ID for admin commands
+- `MODERATION_CHAT_ID` – (optional) Chat ID for moderation group
+- `MODERATION_TOPIC_ID` – (optional) Topic/thread ID for moderation group
+- `APPROVED_TOPIC_ID` – (optional) Topic/thread ID for approved group

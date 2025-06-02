@@ -2,17 +2,17 @@ package main
 
 import (
 	"database/sql"
-	"fmt"
 	"log"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/matterbridge/telegram-bot-api/v6"
 
 	"gosalebot/bot"
 	"gosalebot/fsm"
+	gosaledb "gosalebot/db"
 )
 
 var (
@@ -61,8 +61,8 @@ func handleUpdate(db *sql.DB, botAPI *tgbotapi.BotAPI, update tgbotapi.Update, m
 		userID := update.Message.From.ID
 		text := update.Message.Text
 		var photoFileIDs []string
-		if update.Message.Photo != nil && len(*update.Message.Photo) > 0 {
-			for _, photo := range *update.Message.Photo {
+		if update.Message.Photo != nil && len(update.Message.Photo) > 0 {
+			for _, photo := range update.Message.Photo {
 				photoFileIDs = append(photoFileIDs, photo.FileID)
 			}
 		}
@@ -173,26 +173,26 @@ func main() {
 	}
 
 	// Set config values from env if not present
-	if err := db.SetConfig(db, "MODERATION_GROUP_ID", modGroup); err != nil {
+	if err := gosaledb.SetConfig(db, "MODERATION_GROUP_ID", modGroup); err != nil {
 		log.Printf("Failed to set MODERATION_GROUP_ID in config: %v", err)
 	}
-	if err := db.SetConfig(db, "APPROVED_GROUP_ID", approvedGroup); err != nil {
+	if err := gosaledb.SetConfig(db, "APPROVED_GROUP_ID", approvedGroup); err != nil {
 		log.Printf("Failed to set APPROVED_GROUP_ID in config: %v", err)
 	}
-	if err := db.SetConfig(db, "TIMEOUT_MINUTES", "1440"); err != nil { // default 24h
+	if err := gosaledb.SetConfig(db, "TIMEOUT_MINUTES", "1440"); err != nil { // default 24h
 		log.Printf("Failed to set TIMEOUT_MINUTES in config: %v", err)
 	}
 
 	// Read config values from DB
-	modGroup, err = db.GetConfig(db, "MODERATION_GROUP_ID")
+	modGroup, err = gosaledb.GetConfig(db, "MODERATION_GROUP_ID")
 	if err != nil {
 		log.Fatal("MODERATION_GROUP_ID not set in config table")
 	}
-	approvedGroup, err = db.GetConfig(db, "APPROVED_GROUP_ID")
+	approvedGroup, err = gosaledb.GetConfig(db, "APPROVED_GROUP_ID")
 	if err != nil {
 		log.Fatal("APPROVED_GROUP_ID not set in config table")
 	}
-	timeoutStr, err := db.GetConfig(db, "TIMEOUT_MINUTES")
+	timeoutStr, err := gosaledb.GetConfig(db, "TIMEOUT_MINUTES")
 	if err != nil {
 		log.Fatal("TIMEOUT_MINUTES not set in config table")
 	}
