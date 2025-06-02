@@ -7,17 +7,20 @@ RUN apk update && apk upgrade --no-cache
 # Set the working directory
 WORKDIR /app
 
-# Copy current directory contents into the container at /app
-COPY . .
+# Install build dependencies for CGO/SQLite
+RUN apk add --no-cache gcc musl-dev sqlite
 
-# Download and install any needed dependencies
+# Copy go.mod and go.sum first and download dependencies
+COPY go.mod go.sum ./
 RUN go mod download
 
-# Install SQLite dependency for Go
-RUN apk add --no-cache sqlite
+# Now copy the rest of the source code
+COPY . .
 
-# Build the Go app
-RUN go build -o bot
+# Build the Go app and make it executable
+RUN go build -o gosalebot
+# RUN chmod +x gosalebot
+
 
 # Final stage
 FROM alpine:latest
@@ -26,23 +29,14 @@ FROM alpine:latest
 WORKDIR /app
 
 # Copy the binary from the builder stage
-COPY --from=builder /app/bot ./bot
+COPY --from=builder /app/gosalebot ./gosalebot
 
-# If your bot needs config files or static assets, copy them here as well
-# COPY --from=builder /app/config.yaml ./config.yaml
+# Copy .env file into the container (optional, for reference or debugging)
+COPY .env .env
 
-# Set environment variables if needed
-# ENV TELEGRAM_TOKEN=your_token_here
-ENV MODERATION_GROUP_ID=${MODERATION_GROUP_ID}
-ENV APPROVED_GROUP_ID=${APPROVED_GROUP_ID}
-ENV TIMEOUT_MINUTES=${TIMEOUT_MINUTES}
-ENV LANG=${LANG}
+# Export all environment variables from .env at container start
+# Requires docker-compose or docker run with --env-file .env for actual env usage,
+# but this line ensures .env is present and can be sourced if you use a shell entrypoint.
+# If you want the Go app to see all .env vars, use docker-compose's env_file: .env
 
-# Command to run your app (replace with your actual entrypoint)
-CMD ["./bot"]
-
-# ---
-# To customize for your app:
-# - Change the base image if not using Go
-# - Add build steps for your dependencies
-# - Update the CMD to your app's entrypoint
+CMD ["./gosalebot"]

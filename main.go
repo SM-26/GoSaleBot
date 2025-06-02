@@ -8,11 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/matterbridge/telegram-bot-api/v6"
-
 	"gosalebot/bot"
-	"gosalebot/fsm"
 	gosaledb "gosalebot/db"
+	"gosalebot/fsm"
+	"gosalebot/i18n"
+
+	tgbotapi "github.com/matterbridge/telegram-bot-api/v6" // <--- ADDED THIS LINE
+	_ "github.com/mattn/go-sqlite3"                        // <--- Likely needed for your DB connection
 )
 
 var (
@@ -42,19 +44,47 @@ func startExpirationWorker(db *sql.DB, interval time.Duration) {
 
 func handleUpdate(db *sql.DB, botAPI *tgbotapi.BotAPI, update tgbotapi.Update, moderationGroupID, approvedGroupID int64) {
 	if update.CallbackQuery != nil {
+		data := update.CallbackQuery.Data
 		userID := update.CallbackQuery.From.ID
+		chatID := update.CallbackQuery.Message.Chat.ID
+		messageID := update.CallbackQuery.Message.MessageID
 		lang := os.Getenv("LANG")
 		if lang == "" {
 			lang = "en"
 		}
-		if update.CallbackQuery.Data == "done" {
+		// Only handle confirm/cancel for user preview here
+		if data == "confirm" || data == "cancel" {
+			resp := bot.HandleMessageWithDB(db, userID, data, botAPI, chatID, messageID, nil, moderationGroupID, lang)
+			edit := tgbotapi.NewEditMessageText(chatID, messageID, resp)
+			botAPI.Send(edit)
+			return
+		} else if data == "done" {
 			if session, ok := fsm.Sessions[userID]; ok && session.State == fsm.StatePhotos {
-				response := bot.HandleMessageWithDB(db, userID, "done", botAPI, update.CallbackQuery.Message.Chat.ID, update.CallbackQuery.Message.MessageID, nil, moderationGroupID, lang)
-				edit := tgbotapi.NewEditMessageText(update.CallbackQuery.Message.Chat.ID, update.CallbackQuery.Message.MessageID, response)
+				response := bot.HandleMessageWithDB(db, userID, "done", botAPI, chatID, messageID, nil, moderationGroupID, lang)
+				edit := tgbotapi.NewEditMessageText(chatID, messageID, response)
 				botAPI.Send(edit)
 			}
+			return
+		} else if data == "approve" {
+			err := bot.ApprovePost(db, botAPI, update.CallbackQuery.Message, approvedGroupID)
+			if err != nil {
+				log.Printf("[ERROR] Failed to approve post: %v", err)
+				edit := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Failed to approve post.")
+				botAPI.Send(edit)
+			} else {
+				edit := tgbotapi.NewEditMessageText(chatID, messageID, "✅ Approved and forwarded.")
+				botAPI.Send(edit)
+			}
+			return
+		} else if data == "reject" {
+			err := bot.RejectPost(db, botAPI, update.CallbackQuery.Message, "Rejected by admin")
+			if err != nil {
+				log.Printf("[ERROR] Failed to reject post: %v", err)
+			}
+			edit := tgbotapi.NewEditMessageText(chatID, messageID, "❌ Rejected.")
+			botAPI.Send(edit)
+			return
 		}
-		return
 	}
 
 	if update.Message != nil && update.Message.From != nil {
@@ -93,7 +123,42 @@ func handleUpdate(db *sql.DB, botAPI *tgbotapi.BotAPI, update tgbotapi.Update, m
 			botAPI.Send(msg)
 			return
 		}
-		response := bot.HandleMessageWithDB(db, userID, text, botAPI, update.Message.Chat.ID, update.Message.MessageID, photoFileIDs, moderationGroupID, lang)
+		var session *fsm.UserSession
+		if s, ok := fsm.Sessions[userID]; ok {
+			session = s
+		}
+		username := ""
+		if update.Message.From != nil {
+			username = update.Message.From.UserName
+		}
+		resp := bot.HandleMessageWithDB(db, userID, text, botAPI, update.Message.Chat.ID, update.Message.MessageID, photoFileIDs, moderationGroupID, lang, username)
+		if text == "done" && session != nil && resp == i18n.T(lang, "preview", session.PostData["title"], session.PostData["description"], session.PostData["price"], session.PostData["location"], len(session.PostData["photos"].([]string))) {
+			// User just finished photo upload, now in preview state: show preview with inline buttons
+			if session.State == fsm.StatePreview {
+				var numPhotos int
+				if photos, ok := session.PostData["photos"].([]string); ok {
+					numPhotos = len(photos)
+				} else if photos, ok := session.PostData["photos"].([]interface{}); ok {
+					numPhotos = len(photos)
+				} else {
+					numPhotos = 0
+				}
+				preview := i18n.T(lang, "preview",
+					session.PostData["title"], session.PostData["description"],
+					session.PostData["price"], session.PostData["location"], numPhotos,
+				)
+				msg := tgbotapi.NewMessage(update.Message.Chat.ID, preview)
+				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+					tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData("✅ Confirm", "confirm"),
+						tgbotapi.NewInlineKeyboardButtonData("❌ Cancel", "cancel"),
+					),
+				)
+				msg.ReplyToMessageID = update.Message.MessageID
+				botAPI.Send(msg)
+				return
+			}
+		}
 		showDoneButton := false
 		if session, ok := fsm.Sessions[userID]; ok && session.State == fsm.StatePhotos {
 			showDoneButton = true
@@ -101,15 +166,20 @@ func handleUpdate(db *sql.DB, botAPI *tgbotapi.BotAPI, update tgbotapi.Update, m
 		if showDoneButton {
 			btn := tgbotapi.NewInlineKeyboardButtonData("Done", "done")
 			markup := tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(btn))
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, response)
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, resp)
 			msg.ReplyMarkup = markup
 			msg.ReplyToMessageID = update.Message.MessageID
 			botAPI.Send(msg)
 			return
 		}
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID, response)
+		msg := tgbotapi.NewMessage(update.Message.Chat.ID, resp)
 		msg.ReplyToMessageID = update.Message.MessageID
-		botAPI.Send(msg)
+		if resp != "" {
+			_, err := botAPI.Send(msg)
+			if err != nil {
+				log.Printf("Error sending message: %v", err)
+			}
+		}
 	}
 }
 
@@ -171,6 +241,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create config table: %v", err)
 	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY,
+		username TEXT
+	)`)
+	if err != nil {
+		log.Fatalf("Failed to create users table: %v", err)
+	}
 
 	// Set config values from env if not present
 	if err := gosaledb.SetConfig(db, "MODERATION_GROUP_ID", modGroup); err != nil {
@@ -213,6 +290,8 @@ func main() {
 	updates := botAPI.GetUpdatesChan(u)
 
 	startExpirationWorker(db, time.Duration(timeoutMinutes)*time.Minute)
+
+	bot.LoadAdminsFromEnv()
 
 	for update := range updates {
 		handleUpdate(db, botAPI, update, ModerationGroupID, ApprovedGroupID)

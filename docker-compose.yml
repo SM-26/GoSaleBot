@@ -2,12 +2,8 @@ services:
   telegram-bot:
     build: .
     container_name: telegram-bot
-    environment:
-      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
-      - MODERATION_GROUP_ID=${MODERATION_GROUP_ID}
-      - APPROVED_GROUP_ID=${APPROVED_GROUP_ID}
-      - TIMEOUT_MINUTES=${TIMEOUT_MINUTES}
-      - LANG=${LANG}
+    env_file:
+      - .env
     volumes:
       - ./data:/app/data
     restart: unless-stopped

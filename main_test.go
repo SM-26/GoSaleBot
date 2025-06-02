@@ -2,6 +2,9 @@ package main
 
 import (
 	"database/sql"
+	"gosalebot/bot"
+	"gosalebot/db"
+	"gosalebot/fsm"
 	"os"
 	"strconv"
 	"testing"

@@ -91,3 +91,8 @@ Welcome to the GoSaleBot documentation! This folder provides technical and opera
 - [../README.md](../README.md) – Project overview and quick start
 
 Feel free to add more markdown files for specific topics, such as troubleshooting, advanced configuration, or developer guides.
+
+## To do list:
+- [ ] readd the user preview feature
+- [ ] remake the whole test file
+- [ ] test photo upload

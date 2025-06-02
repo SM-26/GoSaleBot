@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"log"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func SavePhotoToDB(db *sql.DB, postID int64, fileID string) error {

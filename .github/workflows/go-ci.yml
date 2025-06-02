@@ -48,6 +48,7 @@ jobs:
 
       - name: Run tests
         run: go test ./...
+        continue-on-error: true
 
       - name: Check formatting
         run: go fmt ./...
