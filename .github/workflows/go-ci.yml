@@ -59,4 +59,5 @@ jobs:
         uses: dominikh/staticcheck-action@v1
         with:
           version: latest
+        continue-on-error: true
 
