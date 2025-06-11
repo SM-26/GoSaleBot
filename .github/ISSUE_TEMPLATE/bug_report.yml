@@ -1,9 +1,7 @@
-name: 🐛 Bug Report
+name: "🐛 Bug Report"
 description: Report a bug or unexpected behavior in GoSaleBot.
 title: "[BUG] - <Brief, descriptive title>"
 labels: ["bug", "needs-triage"]
-assignees: [] # You can add default assignees here, e.g., - your-github-username
-
 body:
   - type: markdown
     attributes:
@@ -63,7 +61,7 @@ body:
   - type: textarea
     id: environment
     attributes:
-      label: 💻 Environment (please complete the following information):
+      label: 💻 Environment (please complete the following information);
       description: This helps us understand where the bug occurred.
       value: |
         - **GoSaleBot Version:** [e.g. v1.0.0 or commit hash if built from source]
