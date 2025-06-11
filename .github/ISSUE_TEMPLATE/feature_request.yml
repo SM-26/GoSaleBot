@@ -1,6 +1,6 @@
 name: "🚀 Feature Request"
 description: "I have a specific suggestion for GoSaleBot!"
-labels: ["needs triage", "Enhancement"]
+labels: ["needs triage", "enhancement"]
 body:
   - type: markdown
     attributes:
