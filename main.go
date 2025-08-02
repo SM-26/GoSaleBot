@@ -116,13 +116,13 @@ func handleUpdate(db *sql.DB, botAPI *tgbotapi.BotAPI, update tgbotapi.Update, m
 		if lang == "" {
 			lang = "en"
 		}
-		if bot.IsAdmin(userID) && (strings.HasPrefix(text, "/config") || text == "/pending") {
-			response := bot.HandleAdminCommand(db, userID, text)
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, response)
-			msg.ReplyToMessageID = update.Message.MessageID
-			botAPI.Send(msg)
-			return
-		}
+			   if strings.HasPrefix(text, "/config") || text == "/pending" {
+					   response := bot.HandleAdminCommand(db, userID, text)
+					   msg := tgbotapi.NewMessage(update.Message.Chat.ID, response)
+					   msg.ReplyToMessageID = update.Message.MessageID
+					   botAPI.Send(msg)
+					   return
+			   }
 		var session *fsm.UserSession
 		if s, ok := fsm.Sessions[userID]; ok {
 			session = s

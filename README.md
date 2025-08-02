@@ -57,8 +57,13 @@ This project is licensed under the Creative Commons Attribution-NonCommercial 4.
 
 ## Environment Variables
 
-- `TELEGRAM_TOKEN` – Your Telegram bot token
-- `ADMIN_CHAT_ID` – Your Telegram user ID for admin commands
-- `MODERATION_CHAT_ID` – (optional) Chat ID for moderation group
+The following environment variables are required or supported. These can be set in your `.env` file or managed at runtime with the `/config` admin command:
+
+- `TELEGRAM_TOKEN` – Your Telegram bot token (required)
+- `MODERATION_GROUP_ID` – Chat ID for the moderation group (required)
+- `APPROVED_GROUP_ID` – Chat ID for the approved posts group (required)
 - `MODERATION_TOPIC_ID` – (optional) Topic/thread ID for moderation group
 - `APPROVED_TOPIC_ID` – (optional) Topic/thread ID for approved group
+- `LANG` – Bot language (`en`, `cz`, `he`)
+- `TIMEOUT_MINUTES` – Timeout in minutes before the bot expires pending posts (default: 1440)
+- `ADMINS` – Comma-separated list of Telegram user IDs with admin rights (required for admin commands)
