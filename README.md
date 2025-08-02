@@ -49,6 +49,11 @@ The bot will guide you through creating a sale post, which will be sent for mode
 - For full technical details, see [docs/README.md](docs/README.md)
 - For design and architecture, see [docs/DesignStructure.adoc](docs/DesignStructure.adoc)
 
+
+## Credits
+
+This project uses the excellent [go-telegram/bot](https://github.com/go-telegram/bot) library for Telegram Bot API integration.
+
 ## License
 
 This project is licensed under the Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0) License. See the [LICENSE](LICENSE) file for details.

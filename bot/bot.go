@@ -1,20 +1,25 @@
 package bot
 
 import (
-	"database/sql"
-	"fmt"
-	"gosalebot/db"
-	"gosalebot/fsm"
-	"gosalebot/i18n"
-	"log"
-	"os"
-	"strconv"
-	"strings"
+   "context"
+   "database/sql"
+   "fmt"
+   "gosalebot/db"
+   "gosalebot/fsm"
+   "gosalebot/i18n"
+   "log"
+   "os"
+   "strconv"
+   "strings"
 
-	tgbotapi "github.com/matterbridge/telegram-bot-api/v6"
-	// tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+   "github.com/go-telegram/bot"
+   "github.com/go-telegram/bot/models"
+   . "github.com/go-telegram/bot"
 )
 
+
+// globalBotInstance is set at startup in main.go for admin command use
+var globalBotInstance *bot.Bot
 var adminIDs map[int64]struct{}
 
 func LoadAdminsFromEnv() {
@@ -31,7 +36,7 @@ func LoadAdminsFromEnv() {
 	}
 }
 
-func HandleMessageWithDB(dbConn *sql.DB, userID int64, text string, bot *tgbotapi.BotAPI, chatID int64, messageID int, photoFileIDs []string, moderationGroupID int64, lang string, username ...string) string {
+func HandleMessageWithDB(dbConn *sql.DB, userID int64, text string, bot *bot.Bot, chatID int64, messageID int, photoFileIDs []string, moderationGroupID int64, lang string, username ...string) string {
 	// lang := "en" // In the future, detect or store user language
 	session, ok := fsm.Sessions[userID]
 	if !ok {
@@ -45,7 +50,13 @@ func HandleMessageWithDB(dbConn *sql.DB, userID int64, text string, bot *tgbotap
 		saveUsername = username[0]
 	}
 
-	switch session.State {
+   // Optionally accept ModerationTopicID as last variadic argument (as string)
+   moderationTopicID := 0
+   if len(username) > 1 {
+	   // username[1] is expected to be a string containing the topic ID
+	   moderationTopicID, _ = strconv.Atoi(username[1])
+   }
+   switch session.State {
 	case fsm.StateIdle:
 		if text == "/start" {
 			_, err := dbConn.Exec(`INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)`, userID, saveUsername)
@@ -96,39 +107,83 @@ func HandleMessageWithDB(dbConn *sql.DB, userID int64, text string, bot *tgbotap
 			session.PostData["photos"] = photos
 			return i18n.T(lang, "photo_received")
 		}
-		if text == "done" {
-			title := session.PostData["title"]
-			description := session.PostData["description"]
-			price := session.PostData["price"]
-			location := session.PostData["location"]
-			photos, _ := session.PostData["photos"].([]string)
-			res, err := dbConn.Exec(`INSERT INTO posts (user_id, chat_id, message_id, status, title, description, price, location, created_at, expires_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, datetime('now'), datetime('now', '+1 day'))`,
-				userID, chatID, messageID, title, description, price, location)
-			if err != nil {
-				log.Printf("[ERROR] Failed to insert post: %v", err)
-				return i18n.T(lang, "failed_save")
-			}
-			postID, _ := res.LastInsertId()
-			for _, fileID := range photos {
-				_, err := dbConn.Exec(`INSERT INTO photos (post_id, file_id) VALUES (?, ?)`, postID, fileID)
-				if err != nil {
-					log.Printf("[ERROR] Failed to insert photo: %v", err)
-				}
-			}
-			log.Printf("[INFO] Post submitted by user %d (postID: %d) for moderation", userID, postID)
-			moderationMsg := i18n.T(lang, "moderation_preview", title, description, price, location)
-			msg := tgbotapi.NewMessage(moderationGroupID, moderationMsg)
-			msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
-				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("✅ Approve", "approve"),
-					tgbotapi.NewInlineKeyboardButtonData("❌ Reject", "reject"),
-				),
-			)
-			_, _ = bot.Send(msg)
-			session.State = fsm.StateIdle
-			session.PostData = make(map[string]interface{})
-			return i18n.T(lang, "post_submitted")
-		}
+	   if text == "done" {
+		   title := session.PostData["title"]
+		   description := session.PostData["description"]
+		   price := session.PostData["price"]
+		   location := session.PostData["location"]
+		   photos, _ := session.PostData["photos"].([]string)
+		   // Always store the user's chat for the post, but send moderation message to moderationGroupID
+		   res, err := dbConn.Exec(`INSERT INTO posts (user_id, chat_id, message_id, status, title, description, price, location, created_at, expires_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, datetime('now'), datetime('now', '+1 day'))`,
+			   userID, chatID, messageID, title, description, price, location)
+		   if err != nil {
+			   log.Printf("[ERROR] Failed to insert post: %v", err)
+			   return i18n.T(lang, "failed_save")
+		   }
+		   postID, _ := res.LastInsertId()
+		   for _, fileID := range photos {
+			   _, err := dbConn.Exec(`INSERT INTO photos (post_id, file_id) VALUES (?, ?)`, postID, fileID)
+			   if err != nil {
+				   log.Printf("[ERROR] Failed to insert photo: %v", err)
+			   }
+		   }
+		   log.Printf("[INFO] Post submitted by user %d (postID: %d) for moderation", userID, postID)
+		   moderationMsg := i18n.T(lang, "moderation_preview", title, description, price, location)
+		   replyMarkup := &models.InlineKeyboardMarkup{
+			   InlineKeyboard: [][]models.InlineKeyboardButton{
+				   {
+					   {Text: "✅ Approve", CallbackData: "approve"},
+					   {Text: "❌ Reject", CallbackData: "reject"},
+				   },
+			   },
+		   }
+		   ctx := context.Background()
+		   if len(photos) > 0 {
+			   // 1. Send moderation message with inline buttons (no photo)
+			   msgParams := &SendMessageParams{
+				   ChatID: moderationGroupID,
+				   Text:   moderationMsg,
+				   ReplyMarkup: replyMarkup,
+			   }
+			   if moderationTopicID != 0 {
+				   msgParams.MessageThreadID = moderationTopicID
+			   }
+			   _, err := bot.SendMessage(ctx, msgParams)
+			   if err != nil {
+				   log.Printf("[ERROR] Failed to send moderation message: %v", err)
+			   }
+			   // 2. Send each photo as a follow-up message (no caption/buttons)
+			   for _, fileID := range photos {
+				   photoParams := &SendPhotoParams{
+					   ChatID: moderationGroupID,
+				   Photo:  models.InputFileString(fileID),
+				   }
+				   if moderationTopicID != 0 {
+					   photoParams.MessageThreadID = moderationTopicID
+				   }
+				   _, err := bot.SendPhoto(ctx, photoParams)
+				   if err != nil {
+					   log.Printf("[ERROR] Failed to send moderation photo: %v", err)
+				   }
+			   }
+		   } else {
+			   req := &SendMessageParams{
+				   ChatID: moderationGroupID, // send to moderation group, not user chat
+				   Text:   moderationMsg,
+				   ReplyMarkup: replyMarkup,
+			   }
+			   if moderationTopicID != 0 {
+				   req.MessageThreadID = moderationTopicID
+			   }
+			   _, err = bot.SendMessage(ctx, req)
+			   if err != nil {
+				   log.Printf("[ERROR] Failed to send moderation message: %v", err)
+			   }
+		   }
+		   session.State = fsm.StateIdle
+		   session.PostData = make(map[string]interface{})
+		   return i18n.T(lang, "post_submitted")
+	   }
 		log.Printf("[WARNING] User %d sent invalid input in photo state: %s", userID, text)
 		return i18n.T(lang, "send_photo_or_done")
 	default:
@@ -138,28 +193,34 @@ func HandleMessageWithDB(dbConn *sql.DB, userID int64, text string, bot *tgbotap
 	}
 }
 
-func ApprovePost(dbConn *sql.DB, bot *tgbotapi.BotAPI, moderationMsg *tgbotapi.Message, approvedGroupID int64) error {
-	// Find the post by matching the moderation message text (could be improved with DB linkage)
-	// For demo, extract title from message and find post
-	title := extractTitleFromModerationMsg(moderationMsg.Text)
-	   // Check if post is still pending before approving
-	   row := dbConn.QueryRow("SELECT id, user_id, description, price, location, status FROM posts WHERE title = ? ORDER BY created_at DESC LIMIT 1", title)
-	   var postID, userID int64
-	   var description, price, location, status string
-	   err := row.Scan(&postID, &userID, &description, &price, &location, &status)
-	   if err != nil {
-			   log.Printf("[ERROR] ApprovePost: failed to find post for title '%s': %v", title, err)
-			   return err
-	   }
-	   if status != "pending" {
-			   log.Printf("[INFO] ApprovePost: post %d is not pending (status: %s), skipping approval.", postID, status)
-			   return nil
-	   }
-	   _, err = dbConn.Exec("UPDATE posts SET status = 'approved' WHERE id = ?", postID)
-	   if err != nil {
-			   log.Printf("[ERROR] ApprovePost: failed to update status: %v", err)
-			   return err
-	   }
+
+// ApprovePost publishes a post to the approved group and deletes the moderation message.
+func ApprovePost(dbConn *sql.DB, bot *bot.Bot, moderationMsg *models.Message, approvedGroupID int64) error {
+   // For media groups, the moderation message is in the caption of the first message; for text, it's in Text
+   var moderationText string
+   if moderationMsg.Caption != "" {
+	   moderationText = moderationMsg.Caption
+   } else {
+	   moderationText = moderationMsg.Text
+   }
+   title := extractTitleFromModerationMsg(moderationText)
+	row := dbConn.QueryRow("SELECT id, user_id, description, price, location, status FROM posts WHERE title = ? ORDER BY created_at DESC LIMIT 1", title)
+	var postID, userID int64
+	var description, price, location, status string
+	err := row.Scan(&postID, &userID, &description, &price, &location, &status)
+	if err != nil {
+		log.Printf("[ERROR] ApprovePost: failed to find post for title '%s': %v", title, err)
+		return err
+	}
+	if status != "pending" {
+		log.Printf("[INFO] ApprovePost: post %d is not pending (status: %s), skipping approval.", postID, status)
+		return nil
+	}
+	_, err = dbConn.Exec("UPDATE posts SET status = 'approved' WHERE id = ?", postID)
+	if err != nil {
+		log.Printf("[ERROR] ApprovePost: failed to update status: %v", err)
+		return err
+	}
 	lang := os.Getenv("LANG")
 	if lang == "" {
 		lang = "en"
@@ -171,108 +232,125 @@ func ApprovePost(dbConn *sql.DB, bot *tgbotapi.BotAPI, moderationMsg *tgbotapi.M
 	if err != nil {
 		log.Printf("[WARNING] ApprovePost: failed to find username for userID '%d': %v", userID, err)
 	}
-	// Compose a new message for the approved group
-	var postedBy string
-	if username != "" {
-		// Only allow safe Telegram usernames (alphanumeric and underscores)
-		if isSafeUsername(username) {
-			postedBy = "@" + username
-		} else {
-			postedBy = fmt.Sprintf("[user](tg://user?id=%d)", userID)
+   postedBy := formatPostedBy(username, userID)
+   msgText := EscapeMarkdown(i18n.T(lang, "for_sale", title, description, price, location, postedBy))
+	// Fetch all photo file_ids for the post
+	rows, err := dbConn.Query("SELECT file_id FROM photos WHERE post_id = ?", postID)
+	var photoFileIDs []string
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var fileID string
+			if err := rows.Scan(&fileID); err == nil {
+				photoFileIDs = append(photoFileIDs, fileID)
+			}
 		}
-	} else {
-		postedBy = fmt.Sprintf("[user](tg://user?id=%d)", userID)
 	}
-	   msgText := escapeMarkdown(i18n.T(lang, "for_sale", title, description, price, location, postedBy))
-	   // If a topic ID is provided in config, set it
-	   topicIDStr, err := db.GetConfig(dbConn, "APPROVED_TOPIC_ID")
-	   var topicID int
-	   if err == nil && topicIDStr != "" {
-			   topicID, err = strconv.Atoi(topicIDStr)
+   ctx := context.Background()
+   if len(photoFileIDs) > 0 {
+	   // Send as media group (album)
+	   var mediaGroup []models.InputMedia
+	   for i, fileID := range photoFileIDs {
+				   media := &models.InputMediaPhoto{
+					   Media: models.InputFileString(fileID),
+				   }
+		   if i == 0 {
+			   media.Caption = msgText
+			   media.ParseMode = "Markdown"
+		   }
+		   mediaGroup = append(mediaGroup, media)
 	   }
-	   // Fetch all photo file_ids for the post
-	   rows, err := dbConn.Query("SELECT file_id FROM photos WHERE post_id = ?", postID)
-	   var photoFileIDs []string
-	   if err == nil {
-			   defer rows.Close()
-			   for rows.Next() {
-					   var fileID string
-					   if err := rows.Scan(&fileID); err == nil {
-							   photoFileIDs = append(photoFileIDs, fileID)
-					   }
-			   }
+	   mediaReq := &SendMediaGroupParams{
+		   ChatID: approvedGroupID,
+		   Media:  mediaGroup,
 	   }
-	   if len(photoFileIDs) > 0 {
-			   // Send as media group (album)
-			   var mediaGroup []tgbotapi.InputMedia
-			   for i, fileID := range photoFileIDs {
-					   if i == 0 {
-							   media := tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID))
-							   media.Caption = msgText
-							   media.ParseMode = "MarkdownV2"
-							   mediaGroup = append(mediaGroup, media)
-					   } else {
-							   mediaGroup = append(mediaGroup, tgbotapi.NewInputMediaPhoto(tgbotapi.FileID(fileID)))
-					   }
-			   }
-			   mediaConfig := tgbotapi.NewMediaGroup(approvedGroupID, mediaGroup)
-			   if topicID != 0 {
-					   mediaConfig.MessageThreadID = topicID
-			   }
-			   _, err = bot.SendMediaGroup(mediaConfig)
-			   if err != nil {
-					   log.Printf("[ERROR] ApprovePost: failed to send media group: %v", err)
-			   }
-	   } else {
-			   // No photos, send text only
-			   msg := tgbotapi.NewMessage(approvedGroupID, msgText)
-			   msg.ParseMode = "MarkdownV2"
-			   if topicID != 0 {
-					   msg.MessageThreadID = topicID
-			   }
-			   _, err = bot.Send(msg)
-			   if err != nil {
-					   log.Printf("[ERROR] ApprovePost: failed to send approved post: %v", err)
-					   return err
-			   }
+	   _, err = bot.SendMediaGroup(ctx, mediaReq)
+	   if err != nil {
+		   log.Printf("[ERROR] ApprovePost: failed to send media group: %v", err)
 	   }
-	// Delete moderation message
-	deleteMsg := tgbotapi.NewDeleteMessage(moderationMsg.Chat.ID, moderationMsg.MessageID)
-	_, delErr := bot.Request(deleteMsg)
-	if delErr != nil {
-		log.Printf("[WARNING] ApprovePost: failed to delete moderation message: %v", delErr)
-	}
-	log.Printf("[INFO] Post %d approved and published by admin", postID)
-	return nil
+   } else {
+	   msgReq := &SendMessageParams{
+		   ChatID:    approvedGroupID,
+		   Text:      msgText,
+		   ParseMode: "Markdown",
+	   }
+	   _, err = bot.SendMessage(ctx, msgReq)
+	   if err != nil {
+		   log.Printf("[ERROR] ApprovePost: failed to send approved post: %v", err)
+		   return err
+	   }
+   }
+   // Notify the user that their post was approved
+   notifyText := i18n.T(lang, "post_approved")
+   notifyReq := &SendMessageParams{
+	   ChatID: userID,
+	   Text:   notifyText,
+   }
+   _, notifyErr := bot.SendMessage(ctx, notifyReq)
+   if notifyErr != nil {
+	   log.Printf("[WARNING] ApprovePost: failed to notify user %d: %v", userID, notifyErr)
+   }
+   // Delete moderation message
+   deleteReq := &DeleteMessageParams{
+	   ChatID:    moderationMsg.Chat.ID,
+	   MessageID: moderationMsg.ID,
+   }
+   _, delErr := bot.DeleteMessage(ctx, deleteReq)
+   if delErr != nil {
+	   log.Printf("[WARNING] ApprovePost: failed to delete moderation message: %v", delErr)
+   }
+   log.Printf("[INFO] Post %d approved and published by admin", postID)
+   return nil
 }
 
-func RejectPost(dbConn *sql.DB, bot *tgbotapi.BotAPI, moderationMsg *tgbotapi.Message, replyText string) error {
-	title := extractTitleFromModerationMsg(moderationMsg.Text)
-	row := dbConn.QueryRow("SELECT id, user_id FROM posts WHERE title = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1", title)
-	var postID, userID int64
-	err := row.Scan(&postID, &userID)
-	if err != nil {
-		log.Printf("[ERROR] RejectPost: failed to find post for title '%s': %v", title, err)
-		return err
+// Helper to format a Telegram username or fallback to user mention
+func formatPostedBy(username string, userID int64) string {
+	if username != "" {
+		if isSafeUsername(username) {
+			return "@" + username
+		}
 	}
-	_, err = dbConn.Exec("UPDATE posts SET status = 'rejected' WHERE id = ?", postID)
-	if err != nil {
-		log.Printf("[ERROR] RejectPost: failed to update status: %v", err)
-		return err
-	}
-	msg := tgbotapi.NewMessage(userID, "Your post was rejected: "+replyText)
-	_, sendErr := bot.Send(msg)
-	if sendErr != nil {
-		log.Printf("[WARNING] RejectPost: failed to notify user: %v", sendErr)
-	}
-	// Delete moderation message
-	deleteMsg := tgbotapi.NewDeleteMessage(moderationMsg.Chat.ID, moderationMsg.MessageID)
-	_, delErr := bot.Request(deleteMsg)
-	if delErr != nil {
-		log.Printf("[WARNING] RejectPost: failed to delete moderation message: %v", delErr)
-	}
-	log.Printf("[INFO] Post %d rejected by admin", postID)
-	return nil
+	return fmt.Sprintf("[user](tg://user?id=%d)", userID)
+}
+
+func RejectPost(dbConn *sql.DB, bot *bot.Bot, moderationMsg *models.Message, replyText string) error {
+   title := extractTitleFromModerationMsg(moderationMsg.Text)
+   row := dbConn.QueryRow("SELECT id, user_id FROM posts WHERE title = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1", title)
+   var postID, userID int64
+   err := row.Scan(&postID, &userID)
+   if err != nil {
+	   log.Printf("[ERROR] RejectPost: failed to find post for title '%s': %v", title, err)
+	   return err
+   }
+   _, err = dbConn.Exec("UPDATE posts SET status = 'rejected' WHERE id = ?", postID)
+   if err != nil {
+	   log.Printf("[ERROR] RejectPost: failed to update status: %v", err)
+	   return err
+   }
+   ctx := context.Background()
+   lang := os.Getenv("LANG")
+   if lang == "" {
+	   lang = "en"
+   }
+   msgReq := &SendMessageParams{
+	   ChatID: userID,
+	   Text:   i18n.T(lang, "post_rejected", replyText),
+   }
+   _, sendErr := bot.SendMessage(ctx, msgReq)
+   if sendErr != nil {
+	   log.Printf("[WARNING] RejectPost: failed to notify user: %v", sendErr)
+   }
+   // Delete moderation message
+   deleteReq := &DeleteMessageParams{
+	   ChatID:    moderationMsg.Chat.ID,
+	   MessageID: moderationMsg.ID,
+   }
+   _, delErr := bot.DeleteMessage(ctx, deleteReq)
+   if delErr != nil {
+	   log.Printf("[WARNING] RejectPost: failed to delete moderation message: %v", delErr)
+   }
+   log.Printf("[INFO] Post %d rejected by admin", postID)
+   return nil
 }
 
 func extractTitleFromModerationMsg(text string) string {
@@ -291,48 +369,248 @@ func IsAdmin(userID int64) bool {
 }
 
 func HandleAdminCommand(dbConn *sql.DB, userID int64, text string) string {
-	if !IsAdmin(userID) {
-		log.Printf("[WARNING] Unauthorized admin command attempt by user %d", userID)
-		return "You are not authorized to use this command."
-	}
-	if strings.HasPrefix(text, "/config ") {
-		parts := strings.SplitN(text, " ", 3)
-		if len(parts) == 3 {
-			key, value := parts[1], parts[2]
-			err := db.SetConfig(dbConn, key, value)
-			if err != nil {
-				log.Printf("[ERROR] Failed to update config %s: %v", key, err)
-				return "Failed to update config: " + err.Error()
-			}
-			log.Printf("[INFO] Config updated by admin %d: %s = %s", userID, key, value)
-			return "Config updated: " + key + " = " + value
-		}
-		log.Printf("[WARNING] Invalid /config usage by admin %d", userID)
-		return "Usage: /config KEY VALUE"
-	}
-	   if text == "/config" {
-			   // List of .env keys to show
-			   envKeys := []string{
-					   "TELEGRAM_TOKEN",
-					   "MODERATION_GROUP_ID",
-					   "APPROVED_GROUP_ID",
-					   "MODERATION_TOPIC_ID",
-					   "APPROVED_TOPIC_ID",
-					   "LANG",
-					   "TIMEOUT_MINUTES",
-					   "ADMINS",
+   lang := os.Getenv("LANG")
+   if lang == "" {
+	   lang = "en"
+   }
+   if !IsAdmin(userID) {
+	   log.Printf("[WARNING] Unauthorized admin command attempt by user %d", userID)
+	   return i18n.T(lang, "not_authorized")
+   }
+   // Approve or reject a pending post by ID: /pending ID approve or /pending ID reject
+   if strings.HasPrefix(text, "/pending ") {
+	   parts := strings.Fields(text)
+	   if len(parts) == 3 && (parts[2] == "approve" || parts[2] == "reject") {
+		   postID, err := strconv.ParseInt(parts[1], 10, 64)
+		   if err != nil {
+			   return "Invalid post ID."
+		   }
+		   row := dbConn.QueryRow("SELECT title, user_id FROM posts WHERE id = ? AND status = 'pending'", postID)
+		   var title string
+		   var userIDVal int64
+		   err = row.Scan(&title, &userIDVal)
+		   if err != nil {
+			   return "No pending post found with that ID."
+		   }
+		   lang := os.Getenv("LANG")
+		   if lang == "" {
+			   lang = "en"
+		   }
+		   var botAPI *bot.Bot
+		   if globalBotInstance != nil {
+			   botAPI = globalBotInstance
+		   } else {
+			   return "Bot instance not available."
+		   }
+		   if parts[2] == "approve" {
+			   // Approve logic (same as before)
+			   // Find the moderation group and approved group IDs
+			   // moderationGroupID, _ := strconv.ParseInt(os.Getenv("MODERATION_GROUP_ID"), 10, 64)
+			   approvedGroupID, _ := strconv.ParseInt(os.Getenv("APPROVED_GROUP_ID"), 10, 64)
+			   // Fetch post details
+			   row = dbConn.QueryRow("SELECT description, price, location FROM posts WHERE id = ?", postID)
+			   var description, price, location string
+			   err = row.Scan(&description, &price, &location)
+			   if err != nil {
+				   return "Failed to fetch post details."
 			   }
-			   var out strings.Builder
-			   for _, key := range envKeys {
-					   val, err := db.GetConfig(dbConn, key)
-					   if err != nil || val == "" {
-							   val = os.Getenv(key)
+			   // Mark as approved
+			   _, err = dbConn.Exec("UPDATE posts SET status = 'approved' WHERE id = ?", postID)
+			   if err != nil {
+				   return "Failed to update post status."
+			   }
+			   // Fetch username
+			   var username string
+			   row = dbConn.QueryRow("SELECT username FROM users WHERE id = ?", userIDVal)
+			   _ = row.Scan(&username)
+			   postedBy := formatPostedBy(username, userIDVal)
+			   msgText := EscapeMarkdown(i18n.T(lang, "for_sale", title, description, price, location, postedBy))
+			   // Fetch all photo file_ids for the post
+			   rows, err := dbConn.Query("SELECT file_id FROM photos WHERE post_id = ?", postID)
+			   var photoFileIDs []string
+			   if err == nil {
+				   defer rows.Close()
+				   for rows.Next() {
+					   var fileID string
+					   if err := rows.Scan(&fileID); err == nil {
+						   photoFileIDs = append(photoFileIDs, fileID)
 					   }
-					   out.WriteString(key + " = " + val + "\n")
+				   }
 			   }
-			   log.Printf("[INFO] Admin %d listed config", userID)
-			   return out.String()
+			   ctx := context.Background()
+			   if len(photoFileIDs) > 0 {
+				   var mediaGroup []models.InputMedia
+				   for i, fileID := range photoFileIDs {
+					   media := &models.InputMediaPhoto{
+						   Media: fileID,
+					   }
+					   if i == 0 {
+						   media.Caption = msgText
+						   media.ParseMode = "Markdown"
+					   }
+					   mediaGroup = append(mediaGroup, media)
+				   }
+				   mediaReq := &SendMediaGroupParams{
+					   ChatID: approvedGroupID,
+					   Media:  mediaGroup,
+				   }
+				   _, err = botAPI.SendMediaGroup(ctx, mediaReq)
+				   if err != nil {
+					   return "Failed to send approved post (media group)."
+				   }
+			   } else {
+				   msgReq := &SendMessageParams{
+					   ChatID:    approvedGroupID,
+					   Text:      msgText,
+					   ParseMode: "Markdown",
+				   }
+				   _, err = botAPI.SendMessage(ctx, msgReq)
+				   if err != nil {
+					   return "Failed to send approved post."
+				   }
+			   }
+			   // Notify the user
+			   notifyText := i18n.T(lang, "post_approved")
+			   notifyReq := &SendMessageParams{
+				   ChatID: userIDVal,
+				   Text:   notifyText,
+			   }
+			   _, _ = botAPI.SendMessage(ctx, notifyReq)
+			   return "Post approved and published."
+		   } else if parts[2] == "reject" {
+			   // Reject logic
+			   _, err = dbConn.Exec("UPDATE posts SET status = 'rejected' WHERE id = ?", postID)
+			   if err != nil {
+				   return "Failed to update post status."
+			   }
+			   notifyText := i18n.T(lang, "post_rejected", "Rejected by admin")
+			   notifyReq := &SendMessageParams{
+				   ChatID: userIDVal,
+				   Text:   notifyText,
+			   }
+			   _, _ = botAPI.SendMessage(context.Background(), notifyReq)
+			   return "Post rejected."
+		   }
 	   }
+	   // If just /pending, fall through to the normal pending list
+   }
+   if text == "/showdb" {
+
+	   // Show all posts, users, photos, and config in the database
+	   var out strings.Builder
+	   out.WriteString("--- Posts ---\n")
+	   rows, err := dbConn.Query("SELECT id, user_id, chat_id, message_id, status, title, description, price, location, created_at, expires_at FROM posts")
+	   if err != nil {
+		   log.Printf("[ERROR] Failed to query posts: %v", err)
+		   out.WriteString("Failed to query posts: " + err.Error() + "\n")
+	   } else {
+		   defer rows.Close()
+		   for rows.Next() {
+			   var id, userID, chatID, messageID int64
+			   var status, title, description, price, location, createdAt, expiresAt string
+			   _ = rows.Scan(&id, &userID, &chatID, &messageID, &status, &title, &description, &price, &location, &createdAt, &expiresAt)
+			   out.WriteString(fmt.Sprintf("ID: %d, User: %d, Chat: %d, Msg: %d, Status: %s, Title: %s, Desc: %s, Price: %s, Loc: %s, Created: %s, Expires: %s\n",
+				   id, userID, chatID, messageID, status, title, description, price, location, createdAt, expiresAt))
+		   }
+	   }
+	   out.WriteString("--- Users ---\n")
+	   userRows, err := dbConn.Query("SELECT id, username FROM users")
+	   if err != nil {
+		   log.Printf("[ERROR] Failed to query users: %v", err)
+		   out.WriteString("Failed to query users: " + err.Error() + "\n")
+	   } else {
+		   defer userRows.Close()
+		   for userRows.Next() {
+			   var id int64
+			   var username string
+			   _ = userRows.Scan(&id, &username)
+			   out.WriteString(fmt.Sprintf("ID: %d, Username: %s\n", id, username))
+		   }
+	   }
+	   out.WriteString("--- Photos ---\n")
+	   photoRows, err := dbConn.Query("SELECT id, post_id, file_id FROM photos")
+	   if err != nil {
+		   log.Printf("[ERROR] Failed to query photos: %v", err)
+		   out.WriteString("Failed to query photos: " + err.Error() + "\n")
+	   } else {
+		   defer photoRows.Close()
+		   for photoRows.Next() {
+			   var id, postID int64
+			   var fileID string
+			   _ = photoRows.Scan(&id, &postID, &fileID)
+			   out.WriteString(fmt.Sprintf("ID: %d, PostID: %d, FileID: %s\n", id, postID, fileID))
+		   }
+	   }
+	   out.WriteString("--- Config ---\n")
+	   configRows, err := dbConn.Query("SELECT key, value FROM config")
+	   if err != nil {
+		   log.Printf("[ERROR] Failed to query config: %v", err)
+		   out.WriteString("Failed to query config: " + err.Error() + "\n")
+	   } else {
+		   defer configRows.Close()
+		   for configRows.Next() {
+			   var key, value string
+			   _ = configRows.Scan(&key, &value)
+			   out.WriteString(fmt.Sprintf("%s = %s\n", key, value))
+		   }
+	   }
+	   log.Printf("[INFO] Admin %d showed db", userID)
+	   return out.String()
+   }
+   if text == "/cleardb" {
+	   // Clear all photos and posts from the database (do not clear users)
+	   _, err := dbConn.Exec("DELETE FROM photos")
+	   if err != nil {
+		   log.Printf("[ERROR] Failed to clear photos: %v", err)
+		   return i18n.T(lang, "failed_clear_photos", err.Error())
+	   }
+	   _, err = dbConn.Exec("DELETE FROM posts")
+	   if err != nil {
+		   log.Printf("[ERROR] Failed to clear posts: %v", err)
+		   return i18n.T(lang, "failed_clear_posts", err.Error())
+	   }
+	   log.Printf("[INFO] Admin %d cleared posts and photos", userID)
+	   return i18n.T(lang, "db_cleared")
+   }
+   if strings.HasPrefix(text, "/config ") {
+	  parts := strings.SplitN(text, " ", 3)
+	  if len(parts) == 3 {
+		 key, value := parts[1], parts[2]
+		 err := db.SetConfig(dbConn, key, value)
+		 if err != nil {
+			log.Printf("[ERROR] Failed to update config %s: %v", key, err)
+			return i18n.T(lang, "failed_update_config", err.Error())
+		 }
+		 log.Printf("[INFO] Config updated by admin %d: %s = %s", userID, key, value)
+		 return i18n.T(lang, "config_updated", key, value)
+	  }
+	  log.Printf("[WARNING] Invalid /config usage by admin %d", userID)
+	  return i18n.T(lang, "config_usage")
+   }
+
+   if text == "/config" {
+	  // List of .env keys to show
+	  envKeys := []string{
+		 "TELEGRAM_TOKEN",
+		 "MODERATION_GROUP_ID",
+		 "APPROVED_GROUP_ID",
+		 "MODERATION_TOPIC_ID",
+		 "APPROVED_TOPIC_ID",
+		 "LANG",
+		 "TIMEOUT_MINUTES",
+		 "ADMINS",
+	  }
+	  var out strings.Builder
+	  for _, key := range envKeys {
+		 val, err := db.GetConfig(dbConn, key)
+		 if err != nil || val == "" {
+			val = os.Getenv(key)
+		 }
+		 out.WriteString(key + " = " + val + "\n")
+	  }
+	  log.Printf("[INFO] Admin %d listed config", userID)
+	  return out.String()
+   }
 	if text == "/pending" {
 		rows, err := dbConn.Query("SELECT id, user_id, title, created_at FROM posts WHERE status = 'pending'")
 		if err != nil {
@@ -350,55 +628,76 @@ func HandleAdminCommand(dbConn *sql.DB, userID int64, text string) string {
 		log.Printf("[INFO] Admin %d listed pending posts", userID)
 		return out.String()
 	}
-	log.Printf("[WARNING] Unknown admin command by user %d: %s", userID, text)
-	return "Unknown admin command."
+   log.Printf("[WARNING] Unknown admin command by user %d: %s", userID, text)
+   return i18n.T(lang, "unknown_admin_command")
 }
 
-func HandleCallbackQuery(db *sql.DB, update tgbotapi.Update, botAPI *tgbotapi.BotAPI, approvedGroupID int64) {
-	if update.CallbackQuery != nil {
-		data := update.CallbackQuery.Data
-		lang := os.Getenv("LANG")
-		if lang == "" {
-			lang = "en"
-		}
-		userID := update.CallbackQuery.From.ID
-		if data == "approve" {
-			log.Printf("[INFO] Admin %d approved a post via inline button", userID)
-			_ = ApprovePost(db, botAPI, update.CallbackQuery.Message, approvedGroupID)
-		} else if data == "reject" {
-			log.Printf("[INFO] Admin %d rejected a post via inline button", userID)
-			_ = RejectPost(db, botAPI, update.CallbackQuery.Message, "Rejected by admin")
-		}
-		return
-	}
+func HandleCallbackQuery(db *sql.DB, update models.Update, botAPI *bot.Bot, approvedGroupID int64) {
+   if update.CallbackQuery != nil {
+	   data := update.CallbackQuery.Data
+	   lang := os.Getenv("LANG")
+	   if lang == "" {
+		   lang = "en"
+	   }
+	   userID := update.CallbackQuery.From.ID
+	   // Handle MaybeInaccessibleMessage (zero value check)
+	   var msg *models.Message
+	   if update.CallbackQuery.Message != (models.MaybeInaccessibleMessage{}) && update.CallbackQuery.Message.Message != nil {
+		   msg = update.CallbackQuery.Message.Message
+	   } else {
+		   log.Printf("[ERROR] CallbackQuery does not have accessible message")
+		   return
+	   }
+	   if data == "approve" {
+		   log.Printf("[INFO] Admin %d approved a post via inline button", userID)
+		   _ = ApprovePost(db, botAPI, msg, approvedGroupID)
+		   return
+	   } else if data == "reject" {
+		   log.Printf("[INFO] Admin %d rejected a post via inline button", userID)
+		   _ = RejectPost(db, botAPI, msg, "Rejected by admin")
+		   return
+	   } else if data == "done" {
+		   // User clicked Done button in photo state; treat as if they sent "done"
+		   chatID := msg.Chat.ID
+		   messageID := msg.ID
+		   // No new photos, so pass nil for photoFileIDs
+		   username := ""
+		   if update.CallbackQuery.From.Username != "" {
+			   username = update.CallbackQuery.From.Username
+		   }
+		   // Use moderation group/topic for moderation post
+		   moderationGroupID := os.Getenv("MODERATION_GROUP_ID")
+		   moderationTopicID := os.Getenv("MODERATION_TOPIC_ID")
+		   mgid, _ := strconv.ParseInt(moderationGroupID, 10, 64)
+		   mtid, _ := strconv.Atoi(moderationTopicID)
+		   resp := HandleMessageWithDB(db, userID, "done", botAPI, chatID, messageID, nil, mgid, lang, username, strconv.Itoa(mtid))
+		   // Remove the inline keyboard after click (edit message)
+		   editMarkup := &EditMessageReplyMarkupParams{
+			   ChatID:    chatID,
+			   MessageID: messageID,
+		   }
+		   _, _ = botAPI.EditMessageReplyMarkup(context.Background(), editMarkup)
+		   // Send the preview or next step as a new message
+		   if resp != "" {
+			   msgParams := &SendMessageParams{
+				   ChatID: chatID,
+				   Text:   resp,
+				   ReplyParameters: &models.ReplyParameters{MessageID: messageID},
+			   }
+			   _, err := botAPI.SendMessage(context.Background(), msgParams)
+			   if err != nil {
+				   log.Printf("[ERROR] Failed to send preview after Done: %v", err)
+			   }
+		   }
+		   return
+	   }
+	   // Unknown callback data: ignore
+	   return
+   }
 }
 
 // Add these helpers at the end of the file:
-func escapeMarkdown(s string) string {
-	replacer := strings.NewReplacer(
-		"_", "\\_",
-		"*", "\\*",
-		"[", "\\[",
-		"]", "\\]",
-		"(", "\\(",
-		")", "\\)",
-		"~", "\\~",
-		"`", "\\`",
-		">", "\\>",
-		"#", "\\#",
-		"+", "\\+",
-		"-", "\\-",
-		"=", "\\=",
-		"|", "\\|",
-		"{", "\\{",
-		"}", "\\}",
-		".", "\\.",
-		"!", "\\!",
-		"'", "\\'",
-		"\"", "\\\"",
-	)
-	return replacer.Replace(s)
-}
+
 
 func isSafeUsername(username string) bool {
 	for _, r := range username {
