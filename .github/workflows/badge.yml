@@ -17,7 +17,8 @@ jobs:
 
       - name: Read version from file
         id: version
-        run: echo "VERSION=$(awk '/^## Current Version/{getline; print}' VERSION.md | tr -d '\n')" >> $GITHUB_ENV
+        run: echo "VERSION=$(awk '/^## Current Version/{flag=1;next} /^## Version History/{flag=0} flag && NF' VERSION.md | tr -d '\n')" >> $GITHUB_ENV     
+        
       - name: Create Version Badge
         uses: schneegans/dynamic-badges-action@v1.7.0
         with:
