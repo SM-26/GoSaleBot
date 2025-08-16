@@ -6,6 +6,7 @@ on:
       - main  # Or your default branch, e.g., 'master'
     paths:
       - "VERSION"  # Triggers the workflow only when the VERSION file changes
+  workflow_dispatch:  # Allows manual triggering of the workflow
 
 jobs:
   version_badge:

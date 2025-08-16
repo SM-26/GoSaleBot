@@ -18,7 +18,7 @@ This project follows [Semantic Versioning 2.0.0](https://semver.org/):
 - 0.2.0 - Good working version
 - 0.2.1 - Fixing the images problem, added dependabot and templates to the project.
 - 0.2.2 - Added help command, improved logging, and fixed several bugs.
-- 0.2.3 - Added test suit, fixed basic errors with images (still need some work).
+- 0.2.3 - Added test suit, fixed basic errors with images (still need some work). and version badge
 
 ## How to update
 

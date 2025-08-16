@@ -1,7 +1,7 @@
 # GoSaleBot
 
 [![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](LICENSE)
-[![Version](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SM-26/8c14f658878fc5f1ecf8eee4d07f3cb4/raw/version_GoSalesBot.json)](VERSION)
+[![Version](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/SM-26/8c14f658878fc5f1ecf8eee4d07f3cb4/raw/version_GoSalesBot.json)](VERSION.md)
 
 
 ---
