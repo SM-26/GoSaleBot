@@ -5,7 +5,7 @@ on:
     branches:
       - main  # Or your default branch, e.g., 'master'
     paths:
-      - "VERSION"  # Triggers the workflow only when the VERSION file changes
+      - "VERSION.md"  # Triggers the workflow only when the VERSION file changes
   workflow_dispatch:  # Allows manual triggering of the workflow
 
 jobs:
@@ -17,8 +17,7 @@ jobs:
 
       - name: Read version from file
         id: version
-        run: echo "VERSION=$(cat VERSION)" >> $GITHUB_ENV
-
+        run: echo "VERSION=$(cat VERSION | tr -d '\n')" >> $GITHUB_ENV
       - name: Create Version Badge
         uses: schneegans/dynamic-badges-action@v1.7.0
         with:
