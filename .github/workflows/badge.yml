@@ -1,0 +1,29 @@
+name: "Create a Version Badge"
+
+on:
+  push:
+    branches:
+      - main  # Or your default branch, e.g., 'master'
+    paths:
+      - "VERSION"  # Triggers the workflow only when the VERSION file changes
+
+jobs:
+  version_badge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Read version from file
+        id: version
+        run: echo "VERSION=$(cat VERSION)" >> $GITHUB_ENV
+
+      - name: Create Version Badge
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: 8c14f658878fc5f1ecf8eee4d07f3cb4
+          filename: version_GoSalesBot.json
+          label: Version
+          message: ${{ env.VERSION }}
+          color: brightgreen
