@@ -34,6 +34,7 @@ var Messages = map[string]map[string]string{
 		"db_cleared":                "Database cleared (photos, posts).",
 		"config_updated":            "Config updated: %s = %s",
 		"config_usage":              "Usage: /config KEY VALUE",
+		"failed_update_config":      "Failed to update config: %s",
 	},
 	"cz": {
 		"post_approved":             "Váš příspěvek byl schválen a zveřejněn!",
@@ -62,6 +63,9 @@ var Messages = map[string]map[string]string{
 		"config_usage":              "Použití: /config KLÍČ HODNOTA",
 		"unknown_admin_command":     "Neznámý administrátorský příkaz.",
 		"moderation_preview":        "Nový prodejní příspěvek:\nNázev: %s\nPopis: %s\nCena: %s\nLokalita: %s\nStav: čeká na schválení %s",
+		"post_sent_for_approval":    "Příspěvek odeslán ke schválení!",
+		"for_sale":                  "NA PRODEJ! \nNázev: %s\nPopis: %s\nCena: %s\nLokalita: %s\nZveřejnil/a: %s",
+		"failed_update_config":      "Failed to update config: %s",
 	},
 	"he": {
 		"welcome":                   "ברוך הבא! בוא ניצור פוסט מכירה. אנא הכנס כותרת:",
@@ -92,6 +96,7 @@ var Messages = map[string]map[string]string{
 		"db_cleared":                "המסד נתונים נוקה (תמונות, פוסטים).",
 		"config_updated":            "הגדרה עודכנה: %s = %s",
 		"config_usage":              "שימוש: /config מפתח ערך",
+		"failed_update_config":      "Failed to update config: %s",
 	},
 	// Add more languages here
 }

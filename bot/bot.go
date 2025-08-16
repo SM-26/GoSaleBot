@@ -73,7 +73,7 @@ func HandleMessageWithDB(dbConn *sql.DB, update models.Update, bot *telegram.Bot
 	chatID := update.Message.Chat.ID
 	messageID := update.Message.ID
 	var photoFileIDs []string
-	if update.Message.Photo != nil && len(update.Message.Photo) > 0 {
+	if len(update.Message.Photo) > 0 {
 		// Only use the largest photo (last in the array)
 		photo := update.Message.Photo[len(update.Message.Photo)-1]
 		photoFileIDs = append(photoFileIDs, photo.FileID)
@@ -155,7 +155,7 @@ func HandleMessageWithDB(dbConn *sql.DB, update models.Update, bot *telegram.Bot
 			session.PostData["photos"] = photos
 			return i18n.T(lang, "photo_received")
 		}
-		if text == "done" {
+		if strings.ToLower(text) == "done" {
 			title := session.PostData["title"]
 			description := session.PostData["description"]
 			price := session.PostData["price"]
@@ -263,10 +263,11 @@ func HandleMessageWithDB(dbConn *sql.DB, update models.Update, bot *telegram.Bot
 
 // ApprovePost publishes a post to the approved group and deletes the moderation message.
 func ApprovePost(dbConn *sql.DB, moderationMsg *models.Message, approvedGroupID int64, postID int64) error {
-	row := dbConn.QueryRow("SELECT user_id, title, description, price, location, status FROM posts WHERE id = ?", postID)
 	var userID int64
 	var title, description, price, location, status string
-	err := row.Scan(&userID, &title, &description, &price, &location, &status)
+	var moderationPhotoMessageIDsStr sql.NullString
+	row := dbConn.QueryRow("SELECT user_id, title, description, price, location, status, moderation_photo_message_ids FROM posts WHERE id = ?", postID)
+	err := row.Scan(&userID, &title, &description, &price, &location, &status, &moderationPhotoMessageIDsStr)
 	if err != nil {
 		log.Printf("[ERROR] ApprovePost: failed to find post for id %d: %v", postID, err)
 		return err
@@ -276,18 +277,23 @@ func ApprovePost(dbConn *sql.DB, moderationMsg *models.Message, approvedGroupID 
 		log.Printf("[INFO] ApprovePost: post %d is not pending (status: %s), skipping approval.", postID, status)
 		return nil
 	}
-	_, err = dbConn.Exec("UPDATE posts SET status = 'approved' WHERE id = ?", postID)
-	if err != nil {
-		log.Printf("[ERROR] ApprovePost: failed to update status: %v", err)
-		return err
+
+	// Fetch all photo file_ids for the post BEFORE deleting them
+
+rows, err := dbConn.Query("SELECT file_id FROM photos WHERE post_id = ?", postID)
+	var photoFileIDs []string
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var fileID string
+			if err := rows.Scan(&fileID); err == nil {
+				photoFileIDs = append(photoFileIDs, fileID)
+			}
+		}
+	} else {
+		log.Printf("[ERROR] ApprovePost: failed to query photos for post %d: %v", postID, err)
 	}
 
-	// Delete photos from the database
-	_, err = dbConn.Exec("DELETE FROM photos WHERE post_id = ?", postID)
-	if err != nil {
-		log.Printf("[ERROR] ApprovePost: failed to delete photos for post %d: %v", postID, err)
-		// Do not return error, as the post is already approved
-	}
 	lang := os.Getenv("LANG")
 	if lang == "" {
 		lang = "en"
@@ -301,33 +307,7 @@ func ApprovePost(dbConn *sql.DB, moderationMsg *models.Message, approvedGroupID 
 	}
 	postedBy := formatPostedBy(username, userID)
 	msgText := EscapeMarkdown(i18n.T(lang, "for_sale", title, description, price, location, postedBy))
-	// Fetch all photo file_ids for the post
 
-
-rows, err := dbConn.Query("SELECT file_id FROM photos WHERE post_id = ?", postID)
-	var photoFileIDs []string
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var fileID string
-			if err := rows.Scan(&fileID); err == nil {
-				photoFileIDs = append(photoFileIDs, fileID)
-			}
-		}
-	}
-
-	// Fetch all moderation image message IDs for this post (if stored)
-	var moderationImageMsgIDs []int
-	imgRows, err := dbConn.Query("SELECT message_id FROM moderation_images WHERE post_id = ?", postID)
-	if err == nil {
-		defer imgRows.Close()
-		for imgRows.Next() {
-			var msgID int
-			if err := imgRows.Scan(&msgID); err == nil {
-				moderationImageMsgIDs = append(moderationImageMsgIDs, msgID)
-			}
-		}
-	}
 	ctx := context.Background()
 	if len(photoFileIDs) > 0 {
 		// Send as media group (album)
@@ -362,6 +342,19 @@ rows, err := dbConn.Query("SELECT file_id FROM photos WHERE post_id = ?", postID
 			return err
 		}
 	}
+
+	// Now that the post is sent, update the status and delete the photos from db
+	_, err = dbConn.Exec("UPDATE posts SET status = 'approved' WHERE id = ?", postID)
+	if err != nil {
+		log.Printf("[ERROR] ApprovePost: failed to update status: %v", err)
+		return err
+	}
+
+	_, err = dbConn.Exec("DELETE FROM photos WHERE post_id = ?", postID)
+	if err != nil {
+		log.Printf("[ERROR] ApprovePost: failed to delete photos for post %d: %v", postID, err)
+	}
+
 	// Notify the user that their post was approved
 	notifyText := i18n.T(lang, "post_approved")
 	notifyReq := &telegram.SendMessageParams{
@@ -383,16 +376,25 @@ rows, err := dbConn.Query("SELECT file_id FROM photos WHERE post_id = ?", postID
 	}
 
 	// Delete all moderation group images for this post
-	for _, msgID := range moderationImageMsgIDs {
-		imgDelReq := &telegram.DeleteMessageParams{
-			ChatID:    moderationMsg.Chat.ID,
-			MessageID: msgID,
-		}
-		_, imgDelErr := globalBotInstance.DeleteMessage(ctx, imgDelReq)
-		if imgDelErr != nil {
-			log.Printf("[WARNING] ApprovePost: failed to delete moderation image message %d: %v", msgID, imgDelErr)
+	if moderationPhotoMessageIDsStr.Valid {
+		moderationImageMsgIDs := strings.Split(moderationPhotoMessageIDsStr.String, ",")
+		for _, msgIDStr := range moderationImageMsgIDs {
+			msgID, err := strconv.Atoi(msgIDStr)
+			if err != nil {
+				log.Printf("[WARNING] ApprovePost: failed to parse moderation image message ID '%s': %v", msgIDStr, err)
+				continue
+			}
+			imgDelReq := &telegram.DeleteMessageParams{
+				ChatID:    moderationMsg.Chat.ID,
+				MessageID: msgID,
+			}
+			_, imgDelErr := globalBotInstance.DeleteMessage(ctx, imgDelReq)
+			if imgDelErr != nil {
+				log.Printf("[WARNING] ApprovePost: failed to delete moderation image message %d: %v", msgID, imgDelErr)
+			}
 		}
 	}
+
 	log.Printf("[INFO] Post %d approved and published by admin", postID)
 	return nil
 }
@@ -518,69 +520,69 @@ func HandleAdminCommand(dbConn *sql.DB, userID int64, text string, username stri
 
 			
 rows, err := dbConn.Query("SELECT file_id FROM photos WHERE post_id = ?", postID)
-				var photoFileIDs []string
-				if err == nil {
-					defer rows.Close()
-					for rows.Next() {
-						var fileID string
-						if err := rows.Scan(&fileID); err == nil {
-							photoFileIDs = append(photoFileIDs, fileID)
-						}
+			var photoFileIDs []string
+			if err == nil {
+				defer rows.Close()
+				for rows.Next() {
+					var fileID string
+					if err := rows.Scan(&fileID); err == nil {
+						photoFileIDs = append(photoFileIDs, fileID)
 					}
 				}
-				ctx := context.Background()
-				if len(photoFileIDs) > 0 {
-					var mediaGroup []models.InputMedia
-					for i, fileID := range photoFileIDs {
-						media := &models.InputMediaPhoto{
-							Media: fileID,
-						}
-						if i == 0 {
-							media.Caption = msgText
-							media.ParseMode = "Markdown"
-						}
-						mediaGroup = append(mediaGroup, media)
+			}
+			ctx := context.Background()
+			if len(photoFileIDs) > 0 {
+				var mediaGroup []models.InputMedia
+				for i, fileID := range photoFileIDs {
+					media := &models.InputMediaPhoto{
+						Media: fileID,
 					}
-					mediaReq := &telegram.SendMediaGroupParams{
-						ChatID: approvedGroupID,
-						Media:  mediaGroup,
+					if i == 0 {
+						media.Caption = msgText
+						media.ParseMode = "Markdown"
 					}
-					_, err = globalBotInstance.SendMediaGroup(ctx, mediaReq)
-					if err != nil {
-						return "Failed to send approved post (media group)."
-					}
-				} else {
-					msgReq := &telegram.SendMessageParams{
-						ChatID:    approvedGroupID,
-						Text:      msgText,
-						ParseMode: "Markdown",
-					}
-					_, err = globalBotInstance.SendMessage(ctx, msgReq)
-					if err != nil {
-						return "Failed to send approved post."
-					}
+					mediaGroup = append(mediaGroup, media)
 				}
-				// Notify the user
-				notifyText := i18n.T(lang, "post_approved")
-				notifyReq := &telegram.SendMessageParams{
-					ChatID: userIDVal,
-					Text:   notifyText,
+				mediaReq := &telegram.SendMediaGroupParams{
+					ChatID: approvedGroupID,
+					Media:  mediaGroup,
 				}
-				_, _ = globalBotInstance.SendMessage(ctx, notifyReq)
-				return "Post approved and published."
-			} else if parts[2] == "reject" {
-				// Reject logic
-				_, err = dbConn.Exec("UPDATE posts SET status = 'rejected' WHERE id = ?", postID)
+				_, err = globalBotInstance.SendMediaGroup(ctx, mediaReq)
 				if err != nil {
-					return "Failed to update post status."
+					return "Failed to send approved post (media group)."
 				}
-				notifyText := i18n.T(lang, "post_rejected", "Rejected by admin")
-				notifyReq := &telegram.SendMessageParams{
-					ChatID: userIDVal,
-					Text:   notifyText,
+			} else {
+				msgReq := &telegram.SendMessageParams{
+					ChatID:    approvedGroupID,
+					Text:      msgText,
+					ParseMode: "Markdown",
 				}
-				_, _ = globalBotInstance.SendMessage(context.Background(), notifyReq)
-				return "Post rejected."
+				_, err = globalBotInstance.SendMessage(ctx, msgReq)
+				if err != nil {
+					return "Failed to send approved post."
+				}
+			}
+			// Notify the user
+			notifyText := i18n.T(lang, "post_approved")
+			notifyReq := &telegram.SendMessageParams{
+				ChatID: userIDVal,
+				Text:   notifyText,
+			}
+			_, _ = globalBotInstance.SendMessage(ctx, notifyReq)
+			return "Post approved and published."
+			} else if parts[2] == "reject" {
+			// Reject logic
+			_, err = dbConn.Exec("UPDATE posts SET status = 'rejected' WHERE id = ?", postID)
+			if err != nil {
+				return "Failed to update post status."
+			}
+			notifyText := i18n.T(lang, "post_rejected", "Rejected by admin")
+			notifyReq := &telegram.SendMessageParams{
+				ChatID: userIDVal,
+				Text:   notifyText,
+			}
+			_, _ = globalBotInstance.SendMessage(context.Background(), notifyReq)
+			return "Post rejected."
 			}
 		} // This is the missing brace for "if len(parts) == 3 && (parts[2] == "approve" || parts[2] == "reject")"
 		// If just /pending, fall through to the normal pending list
@@ -774,7 +776,17 @@ func HandleCallbackQuery(db *sql.DB, update models.Update, botAPI *telegram.Bot,
 			// User clicked Done button in photo state; treat as if they sent "done"
 			chatID := msg.Chat.ID
 			messageID := msg.ID
-			// No new photos, so pass nil for photoFileIDs
+
+			// Create a new update object that simulates a text message
+			simulatedUpdate := models.Update{
+				Message: &models.Message{
+					ID:   messageID,
+					Chat: msg.Chat,
+					From: &update.CallbackQuery.From,
+					Text: "done",
+				},
+			}
+
 			username := ""
 			if update.CallbackQuery.From.Username != "" {
 				username = update.CallbackQuery.From.Username
@@ -784,7 +796,7 @@ func HandleCallbackQuery(db *sql.DB, update models.Update, botAPI *telegram.Bot,
 			moderationTopicID := os.Getenv("MODERATION_TOPIC_ID")
 			mgid, _ := strconv.ParseInt(moderationGroupID, 10, 64)
 			mtid, _ := strconv.Atoi(moderationTopicID)
-			resp := HandleMessageWithDB(db, update, globalBotInstance, mgid, lang, username, strconv.Itoa(mtid))
+			resp := HandleMessageWithDB(db, simulatedUpdate, globalBotInstance, mgid, lang, username, strconv.Itoa(mtid))
 			// Remove the inline keyboard after click (edit message)
 			editMarkup := &telegram.EditMessageReplyMarkupParams{
 				ChatID:    chatID,

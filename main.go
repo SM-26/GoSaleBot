@@ -205,12 +205,6 @@ func main() {
 					b.SendMessage(ctx, msg)
 					return
 				}
-				var photoFileIDs []string
-				if update.Message.Photo != nil && len(update.Message.Photo) > 0 {
-					// Only use the largest photo (last in the array)
-					photo := update.Message.Photo[len(update.Message.Photo)-1]
-					photoFileIDs = append(photoFileIDs, photo.FileID)
-				}
 				lang := os.Getenv("LANG")
 				if lang == "" {
 					lang = "en"
