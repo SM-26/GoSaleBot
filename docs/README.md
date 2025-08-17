@@ -20,6 +20,7 @@ Welcome to the GoSaleBot documentation! This folder provides technical and opera
      - `APPROVED_TOPIC_ID` – (optional) Topic/thread ID for approved group
      - `LANG` – Default language (en/cz/he)
      - `TIMEOUT_MINUTES` – Post expiration timeout (default: 1440)
+     - `ADMINS` - Comma-separated list of user IDs that are admins.
 3. **Build and run with Docker Compose:**
    ```sh
    docker compose up --build
@@ -36,6 +37,7 @@ Welcome to the GoSaleBot documentation! This folder provides technical and opera
 - SQLite persistent storage
 - Inline keyboard for photo stage
 - Configurable via environment and runtime admin commands
+- Handles users without a username by using their first and last name.
 
 ---
 
@@ -56,13 +58,23 @@ Welcome to the GoSaleBot documentation! This folder provides technical and opera
 ## API Reference / Bot Commands
 
 ### User Commands
-- `/start` – Begin creating a sale post
-- Guided prompts for each sale post field
+
+| Command | Description |
+| --- | --- |
+| `/start` | Begin creating a sale post |
+| `/help` | Shows the help message with all the available commands. |
 
 ### Admin Commands
-- `/config` – Show all config values
-- `/config KEY VALUE` – Set a config value at runtime
-- `/pending` – List all pending posts
+
+| Command | Description |
+| --- | --- |
+| `/config` | Show all config values |
+| `/config KEY VALUE` | Set a config value at runtime |
+| `/pending` | List all pending posts |
+| `/showdb` | Dumps the content of the database. |
+| `/cleardb` | Clears the database from all the posts and images. |
+
+
 
 ### Moderation Actions
 - **Approve:** Send `/approve` or ✅ in the moderation group
@@ -72,16 +84,18 @@ Welcome to the GoSaleBot documentation! This folder provides technical and opera
 
 ## Directory Structure
 
-- `main.go` – Entrypoint, config/env loading, DB setup, event loop, update handler
-- `bot.go` – FSM handler, moderation actions, admin commands, i18n integration
-- `db.go` – DB helpers for posts, photos, config
-- `fsm.go` – FSM state/session management
-- `i18n.go` – Message translations (en, cz, he), i18n.T function
-- `main_test.go` – Tests for config, admin, pending, env parsing, DB logic, FSM flow
-- `Dockerfile` – Multi-stage build for Go Telegram bot
-- `docker-compose.yml` – Service orchestration
-- `.env` – Environment variables (not committed to git)
-- `docs/` – Design and usage documentation
+| Path | Description |
+| --- | --- |
+| `main.go` | Entrypoint, config/env loading, DB setup, event loop, update handler |
+| `bot/bot.go` | Handles all the message logic from the user. |
+| `db/db.go` | DB helpers for posts, photos, config |
+| `fsm/fsm.go` | FSM state/session management |
+| `i18n/i18n.go` | Message translations (en, cz, he), i18n.T function |
+| `main_test.go` | Tests for the main package |
+| `Dockerfile` | Multi-stage build for Go Telegram bot |
+| `docker-compose.yml` | Service orchestration |
+| `.env.example` | Example for environment variables (not committed to git) |
+| `docs/` | Design and usage documentation |
 
 ---
 
@@ -92,7 +106,15 @@ Welcome to the GoSaleBot documentation! This folder provides technical and opera
 
 Feel free to add more markdown files for specific topics, such as troubleshooting, advanced configuration, or developer guides.
 
-## To do list:
-- [ ] readd the user preview feature
-- [ ] remake the whole test file
-- [ ] test photo upload
+## To-do list:
+
+### High-Impact Suggestions
+- [ ] **Refactor `HandleMessageWithDB` in `bot/bot.go`**: This function is the core of your bot's logic, but it has become very large and complex.
+  - **Suggestion**: Break it down into smaller, single-purpose functions for each state (e.g., `handleIdleState`, `handlePriceState`).
+  - **Benefit**: This will make the code easier to read, test, and maintain.
+- [ ] **Improve Data Handling in `db/db.go`**: The `SavePostToDB` function currently accepts a `map[string]interface{}` for `postData`.
+  - **Suggestion**: Replace the map with a dedicated `Post` struct. This struct would hold all the data for a new post in a type-safe manner.
+  - **Benefit**: This will prevent potential runtime errors, make your database logic more robust, and improve code clarity.
+- [ ] **Refactor `HandleAdminCommand` in `bot/bot.go`**: Similar to the message handler, the admin command handler is getting long.
+  - **Suggestion**: Create a map of command strings to handler functions (e.g., `map[string]func(*sql.DB, ...)`). This is a common and clean pattern for handling sub-commands.
+  - **Benefit**: This will make it much easier to add or modify admin commands in the future.

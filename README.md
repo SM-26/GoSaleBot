@@ -15,11 +15,14 @@ A modular, production-ready Telegram bot for handling sale posts with moderation
 ## Features
 
 - Guided sale post creation (title, description, price, location, photos)
-- Moderation workflow (approve/reject in group)
+- Moderation workflow (approve via ✅, reject via reply)
 - Multi-language support (English, Czech, Hebrew)
 - Admin commands for runtime config and pending review
 - SQLite persistent storage
 - Easy deployment with Docker & Docker Compose
+- Inline keyboard for photo stage
+- Configurable via environment and runtime admin commands
+- Handles users without a username by using their first and last name.
 
 ## Quick Start
 
@@ -36,15 +39,16 @@ cp .env.example .env
 docker compose up --build
 ```
 
-## Usage
+## Commands
 
-Once the bot is running, interact with it on Telegram:
+### User Commands
 
-```text
-/start
-```
+| Command | Description |
+| --- | --- |
+| `/start` | Begin creating a sale post |
+| `/help` | Shows the help message with all the available commands. |
 
-The bot will guide you through creating a sale post, which will be sent for moderation.
+For a full list of commands, including admin commands, see the [detailed documentation](docs/README.md).
 
 ## Documentation
 
@@ -66,11 +70,13 @@ This project is licensed under the Creative Commons Attribution-NonCommercial 4.
 
 The following environment variables are required or supported. These can be set in your `.env` file or managed at runtime with the `/config` admin command:
 
-- `TELEGRAM_TOKEN` – Your Telegram bot token (required)
-- `MODERATION_GROUP_ID` – Chat ID for the moderation group (required)
-- `APPROVED_GROUP_ID` – Chat ID for the approved posts group (required)
-- `MODERATION_TOPIC_ID` – (optional) Topic/thread ID for moderation group
-- `APPROVED_TOPIC_ID` – (optional) Topic/thread ID for approved group
-- `LANG` – Bot language (`en`, `cz`, `he`)
-- `TIMEOUT_MINUTES` – Timeout in minutes before the bot expires pending posts (default: 1440)
-- `ADMINS` – Comma-separated list of Telegram user IDs with admin rights (required for admin commands)
+| Variable | Description | Required |
+| --- | --- | --- |
+| `TELEGRAM_TOKEN` | Your Telegram bot token | **Yes** |
+| `MODERATION_GROUP_ID` | Chat ID for the moderation group | **Yes** |
+| `APPROVED_GROUP_ID` | Chat ID for the approved posts group | **Yes** |
+| `ADMINS` | Comma-separated list of Telegram user IDs with admin rights | **Yes** |
+| `MODERATION_TOPIC_ID` | (optional) Topic/thread ID for moderation group | No |
+| `APPROVED_TOPIC_ID` | (optional) Topic/thread ID for approved group | No |
+| `LANG` | Bot language (`en`, `cz`, `he`) | No |
+| `TIMEOUT_MINUTES` | Timeout in minutes before the bot expires pending posts (default: 1440) | No |

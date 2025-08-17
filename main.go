@@ -26,8 +26,10 @@ var (
 func startExpirationWorker(db *sql.DB, interval time.Duration) {
 	go func() {
 		for {
-			rows, err := db.Query(`SELECT id, user_id, title FROM posts WHERE status = 'pending' AND expires_at < datetime('now')`)
-			if err == nil {
+			rows, err := db.Query(`SELECT id, user_id, title FROM posts WHERE status = ? AND expires_at < datetime('now')`, gosalebot.StatusPending)
+			if err != nil {
+				log.Printf("[ERROR] Failed to query for expired posts: %v", err)
+			} else {
 				for rows.Next() {
 					var id, userID int64
 					var title string
@@ -43,37 +45,41 @@ func startExpirationWorker(db *sql.DB, interval time.Duration) {
 	}()
 }
 
+func getConfigValue(db *sql.DB, key, defaultValue string) string {
+	// 1. Check environment variable
+	value := os.Getenv(key)
+	if value != "" {
+		// If found in env, save to DB for consistency and return
+		if err := gosaledb.SetConfig(db, key, value); err != nil {
+			log.Printf("Failed to set config key %s from env to DB: %v", key, err)
+		}
+		return value
+	}
+
+	// 2. Check database
+	value, err := gosaledb.GetConfig(db, key)
+	if err == nil && value != "" {
+		// If found in DB, set to env for consistency and return
+		os.Setenv(key, value)
+		return value
+	}
+
+	// 3. Use default value
+	if defaultValue != "" {
+		// If default value is provided, set it in env and DB
+		os.Setenv(key, defaultValue)
+		if err := gosaledb.SetConfig(db, key, defaultValue); err != nil {
+			log.Printf("Failed to set default config for key %s to DB: %v", key, err)
+		}
+		return defaultValue
+	}
+
+	return ""
+}
+
 // No longer needed: handleUpdate. All update handling is now done via github.com/go-telegram/bot handlers.
 
 func main() {
-	telegramToken := os.Getenv("TELEGRAM_TOKEN")
-	if telegramToken == "" {
-		log.Fatal("TELEGRAM_TOKEN environment variable is required")
-	}
-
-	modGroup := os.Getenv("MODERATION_GROUP_ID")
-	approvedGroup := os.Getenv("APPROVED_GROUP_ID")
-	moderationTopic := os.Getenv("MODERATION_TOPIC_ID")
-	if modGroup == "" || approvedGroup == "" {
-		log.Fatal("MODERATION_GROUP_ID and APPROVED_GROUP_ID environment variables are required")
-	}
-	var err error
-	ModerationGroupID, err = strconv.ParseInt(modGroup, 10, 64)
-	if err != nil {
-		log.Fatalf("Invalid MODERATION_GROUP_ID: %v", err)
-	}
-	ApprovedGroupID, err = strconv.ParseInt(approvedGroup, 10, 64)
-	if err != nil {
-		log.Fatalf("Invalid APPROVED_GROUP_ID: %v", err)
-	}
-	ModerationTopicID := 0
-	if moderationTopic != "" {
-		ModerationTopicID, err = strconv.Atoi(moderationTopic)
-		if err != nil {
-			log.Fatalf("Invalid MODERATION_TOPIC_ID: %v", err)
-		}
-	}
-
 	db, err := sql.Open("sqlite3", "./data/gosalebot.db")
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
@@ -126,51 +132,36 @@ func main() {
 		log.Fatalf("Failed to create users table: %v", err)
 	}
 
-	// Ensure all .env keys are present in config table
-	envKeys := []string{
-		"TELEGRAM_TOKEN",
-		"MODERATION_GROUP_ID",
-		"APPROVED_GROUP_ID",
-		"MODERATION_TOPIC_ID",
-		"APPROVED_TOPIC_ID",
-		"LANG",
-		"TIMEOUT_MINUTES",
-		"ADMINS",
-	}
-	for _, key := range envKeys {
-		val := os.Getenv(key)
-		if val == "" {
-			// Provide defaults for some keys if not set
-			switch key {
-			case "TIMEOUT_MINUTES":
-				val = "1440"
-			case "LANG":
-				val = "en"
-			}
-		}
-		if err := gosaledb.SetConfig(db, key, val); err != nil {
-			log.Printf("Failed to set %s in config: %v", key, err)
-		}
+	telegramToken := getConfigValue(db, "TELEGRAM_TOKEN", "")
+	if telegramToken == "" {
+		log.Fatal("TELEGRAM_TOKEN environment variable is required")
 	}
 
-	// Read config values from DB
-	modGroup, err = gosaledb.GetConfig(db, "MODERATION_GROUP_ID")
-	if err != nil {
-		log.Fatal("MODERATION_GROUP_ID not set in config table")
+	modGroupStr := getConfigValue(db, "MODERATION_GROUP_ID", "")
+	approvedGroupStr := getConfigValue(db, "APPROVED_GROUP_ID", "")
+	if modGroupStr == "" || approvedGroupStr == "" {
+		log.Fatal("MODERATION_GROUP_ID and APPROVED_GROUP_ID are required")
 	}
-	approvedGroup, err = gosaledb.GetConfig(db, "APPROVED_GROUP_ID")
+
+	ModerationGroupID, err = strconv.ParseInt(modGroupStr, 10, 64)
 	if err != nil {
-		log.Fatal("APPROVED_GROUP_ID not set in config table")
+		log.Fatalf("Invalid MODERATION_GROUP_ID: %v", err)
 	}
-	timeoutStr, err := gosaledb.GetConfig(db, "TIMEOUT_MINUTES")
+	ApprovedGroupID, err = strconv.ParseInt(approvedGroupStr, 10, 64)
 	if err != nil {
-		log.Fatal("TIMEOUT_MINUTES not set in config table")
+		log.Fatalf("Invalid APPROVED_GROUP_ID: %v", err)
 	}
-	timeoutMinutes, err := strconv.Atoi(timeoutStr)
-	if err != nil {
-		log.Fatalf("Invalid TIMEOUT_MINUTES: %v", err)
-	}
-	log.Printf("Config loaded: MODERATION_GROUP_ID=%s, APPROVED_GROUP_ID=%s, TIMEOUT_MINUTES=%d", modGroup, approvedGroup, timeoutMinutes)
+
+	moderationTopicStr := getConfigValue(db, "MODERATION_TOPIC_ID", "0")
+	ModerationTopicID, _ := strconv.Atoi(moderationTopicStr)
+
+	getConfigValue(db, "LANG", "en")
+	timeoutStr := getConfigValue(db, "TIMEOUT_MINUTES", "1440")
+	timeoutMinutes, _ := strconv.Atoi(timeoutStr)
+
+	getConfigValue(db, "ADMINS", "")
+
+	log.Printf("Config loaded: MODERATION_GROUP_ID=%s, APPROVED_GROUP_ID=%s, TIMEOUT_MINUTES=%d", modGroupStr, approvedGroupStr, timeoutMinutes)
 
 	opts := []bot.Option{
 		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, update *models.Update) {
