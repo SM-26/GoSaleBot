@@ -20,11 +20,16 @@ jobs:
 
       - name: Read version from file
         id: version
-        # Read the line immediately after the "## Current Version" header (robust against spacing)
+        # Extract a strict semver-looking line (e.g. 0.3.1) to avoid grabbing markdown or changelog text
         run: |
-          VERSION_LINE=$(awk '/^## Current Version/{getline; print; exit}' VERSION.md)
-          # strip CRLF if present and export
-          echo "VERSION=$(echo "$VERSION_LINE" | tr -d '\r' | tr -d '\n')" >> $GITHUB_ENV
+          set -euo pipefail
+          VERSION=$(grep -Eo '^[0-9]+\.[0-9]+\.[0-9]+$' VERSION.md | head -n1 | tr -d '\r' | tr -d '\n')
+          if [ -z "${VERSION}" ]; then
+            echo "Failed to extract version from VERSION.md" >&2
+            exit 1
+          fi
+          # export as step output for reliable access in subsequent steps
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
         
       - name: Create Version Badge
         uses: schneegans/dynamic-badges-action@v1.7.0
@@ -33,5 +38,5 @@ jobs:
           gistID: 8c14f658878fc5f1ecf8eee4d07f3cb4
           filename: version_GoSalesBot.json
           label: Version
-          message: ${{ env.VERSION }}
+          message: ${{ steps.version.outputs.version }}
           color: brightgreen
