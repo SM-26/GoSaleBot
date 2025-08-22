@@ -10,16 +10,11 @@ This project follows [Semantic Versioning 2.0.0](https://semver.org/):
 
 ## Current Version
 
-0.2.4
+0.3.1
 
-## Version History
+## Changelog
 
-- 0.1.0 – Initial private release with FSM, moderation, admin, i18n, Docker, and docs
-- 0.2.0 - Good working version
-- 0.2.1 - Fixing the images problem, added dependabot and templates to the project.
-- 0.2.2 - Added help command, improved logging, and fixed several bugs.
-- 0.2.3 - Added test suit, fixed basic errors with images (still need some work). and version badge
-- 0.2.4 - Refactored configuration loading, improved error handling, used constants for post status, and updated documentation.
+See [CHANGELOG.md](CHANGELOG.md) for the full version history and release notes.
 
 ## How to update
 

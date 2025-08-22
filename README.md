@@ -47,6 +47,7 @@ docker compose up --build
 | --- | --- |
 | `/start` | Begin creating a sale post |
 | `/help` | Shows the help message with all the available commands. |
+| `/myposts` | List your posts and allow deleting or marking as sold |
 
 For a full list of commands, including admin commands, see the [detailed documentation](docs/README.md).
 
@@ -80,3 +81,12 @@ The following environment variables are required or supported. These can be set 
 | `APPROVED_TOPIC_ID` | (optional) Topic/thread ID for approved group | No |
 | `LANG` | Bot language (`en`, `cz`, `he`) | No |
 | `TIMEOUT_MINUTES` | Timeout in minutes before the bot expires pending posts (default: 1440) | No |
+| `VALIDATE_PRICE` | Enable/disable server-side price validation (true/false). Default: true | No |
+| `MIN_PHOTOS` | Minimum number of photos required to submit a post. Default: 1 | No |
+
+## Next suggested tasks
+
+- Add `/myposts` pagination or inline-button UI for better UX (currently supports text commands only).
+- Implement a way to mark approved-group posts as "sold" (update or delete the message in the approved group).
+- Add admin `/broadcast` command (consider rate-limiting / job queue for many users).
+- Run `golangci-lint` and address any issues found.

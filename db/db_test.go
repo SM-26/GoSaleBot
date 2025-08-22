@@ -116,17 +116,18 @@ func TestSavePostToDB(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
-	postData := map[string]interface{}{
-		"title":       "Test Title",
-		"description": "Test Description",
-		"price":       "100",
-		"location":    "Test Location",
-		"photos":      []string{"file1", "file2"},
-		"chat_id":     int64(12345),
-		"message_id":  54321,
+	post := Post{
+		UserID:      9876,
+		ChatID:      int64(12345),
+		MessageID:   54321,
+		Title:       "Test Title",
+		Description: "Test Description",
+		Price:       "100",
+		Location:    "Test Location",
+		Photos:      []string{"file1", "file2"},
 	}
 
-	postID, err := SavePostToDB(db, 9876, postData)
+	postID, err := SavePostToDB(db, post)
 	if err != nil {
 		t.Fatalf("SavePostToDB failed: %v", err)
 	}

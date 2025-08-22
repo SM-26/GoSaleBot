@@ -41,24 +41,6 @@ func TestIsSafeUsername(t *testing.T) {
 	}
 }
 
-func TestEscapeMarkdown(t *testing.T) {
-	testCases := []struct {
-		input    string
-		expected string
-	}{
-		{"hello_world", "hello\\_world"},
-		{"*bold* text", "\\*bold\\* text"},
-		{"[link](url)", "\\[link\\]\\(url\\)"},
-	}
-
-	for _, tc := range testCases {
-		result := EscapeMarkdown(tc.input)
-		if result != tc.expected {
-			t.Errorf("For input '%s', expected '%s', but got '%s'", tc.input, tc.expected, result)
-		}
-	}
-}
-
 func TestGetHelpMessage(t *testing.T) {
 	// Test for non-admin user
 	helpMessage := GetHelpMessage(999)

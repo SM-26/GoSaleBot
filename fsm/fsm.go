@@ -1,9 +1,10 @@
 package fsm
 
 type UserSession struct {
-	UserID   int64
-	State    int
-	PostData map[string]interface{}
+	UserID int64
+	State  int
+	// Draft holds a typed representation of the post being created.
+	Draft *PostDraft
 }
 
 const (
@@ -17,3 +18,12 @@ const (
 )
 
 var Sessions = make(map[int64]*UserSession)
+
+// PostDraft is a typed structure used while composing a post in the session.
+type PostDraft struct {
+	Title       string
+	Description string
+	Price       string
+	Location    string
+	Photos      []string
+}
