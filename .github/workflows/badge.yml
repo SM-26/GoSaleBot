@@ -10,6 +10,9 @@ on:
 
 jobs:
   version_badge:
+    permissions:
+      contents: read
+      pull-requests: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -17,7 +20,11 @@ jobs:
 
       - name: Read version from file
         id: version
-        run: echo "VERSION=$(awk '/^## Current Version/{flag=1;next} /^## Changelog/{flag=0} flag && NF' VERSION.md | tr -d '\n')" >> $GITHUB_ENV     
+        # Read the line immediately after the "## Current Version" header (robust against spacing)
+        run: |
+          VERSION_LINE=$(awk '/^## Current Version/{getline; print; exit}' VERSION.md)
+          # strip CRLF if present and export
+          echo "VERSION=$(echo "$VERSION_LINE" | tr -d '\r' | tr -d '\n')" >> $GITHUB_ENV
         
       - name: Create Version Badge
         uses: schneegans/dynamic-badges-action@v1.7.0

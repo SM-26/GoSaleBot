@@ -123,20 +123,16 @@ This structure reflects the current repository layout. If you want the table to 
 Feel free to add more markdown files for specific topics, such as troubleshooting, advanced configuration, or developer guides.
 
 ## To-do list:
-- [ ] add an option for the end user to view all of his listing, check for each post it's status (rejected, approved, pending).
+- [X] add an option for the end user to view all of his listing, check for each post it's status (rejected, approved, pending).
+  - [ ] add `/myposts` pagination or inline-button UI for better UX (currently supports text commands).
 - [ ] add an option for the user to also mark a listing as 'sold', a post marked as such should also update it's status in the 'approved group'.
+  - [ ] implement a way to mark approved-group posts as "sold" (update or delete the message in the approved group).
 - [X] add validations in the post creation process, all of the validations should be controlled by the config table.
   - [X] price validation - price must be a numerical value.
   - [X] picture validation - a post must have at least one photo. 
 - [ ] add an option for admins to post a broadcast message to all of the users, e.g. "bot is going down for maintenance".
   - [ ] add an option in the config table to automatically send a message when the bot is starting up and shutting down.
-
-Additional suggested next steps (from recent refactor):
-- [ ] add `/myposts` pagination or inline-button UI for better UX (currently supports text commands). (Recommended)
-- [ ] implement a way to mark approved-group posts as "sold" (update or delete the message in the approved group). (Medium)
-- [ ] add admin `/broadcast` command (consider rate-limiting / job queue for many users). (Medium)
 - [ ] add more i18n keys for any new admin/user flows and date formatting per-locale. (Low)
-- [ ] run `golangci-lint` and fix style/complexity warnings (dev tooling). (Low)
 
 ### High-Impact Suggestions
 - [X] **Refactor `HandleMessageWithDB` in `bot/bot.go`**: This function is the core of your bot's logic, but it has become very large and complex.
