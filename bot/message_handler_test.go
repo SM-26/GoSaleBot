@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"gosalebot/fsm"
 	"gosalebot/i18n"
+	"log"
 	"net/http" // Added for mocking http.Client
 	"os"
 	"testing"
@@ -59,7 +60,11 @@ func newTestDB(t *testing.T) *sql.DB {
 
 func TestHandleIdleState(t *testing.T) {
 	db := newTestDB(t)
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("Error closing database: %v", err)
+		}
+	}()
 
 	session := &fsm.UserSession{UserID: 123, State: fsm.StateIdle}
 
@@ -177,8 +182,11 @@ func TestHandleLocationState(t *testing.T) {
 
 func TestHandlePhotosState(t *testing.T) {
 	db := newTestDB(t)
-	defer db.Close()
-
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("Error closing database: %v", err)
+		}
+	}()
 	// Mock bot for SendMessage and SendPhoto
 	// Initialize with a dummy http.Client to prevent nil pointer dereference
 	mockBot, _ := telegram.New("dummy_token", telegram.WithHTTPClient(0, &mockTelegramHttpClient{}))
@@ -300,8 +308,11 @@ func TestHandlePhotosState(t *testing.T) {
 
 func TestHandleRejectViaReply(t *testing.T) {
 	db := newTestDB(t)
-	defer db.Close()
-
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("Error closing database: %v", err)
+		}
+	}()
 	// Insert a pending post for testing rejection
 	postID := int64(1)
 	userID := int64(123)
@@ -313,7 +324,7 @@ func TestHandleRejectViaReply(t *testing.T) {
 	}
 
 	// Set up admin user
-	os.Setenv("ADMINS", "456")
+	_ = os.Setenv("ADMINS", "456")
 	LoadAdminsFromEnv()
 
 	moderationGroupID := int64(-100123456789)

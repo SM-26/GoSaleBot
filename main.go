@@ -40,7 +40,9 @@ func startExpirationWorker(db *sql.DB, interval time.Duration) {
 						// Optionally, notify admin or update status
 					}
 				}
-				rows.Close()
+				if err := rows.Close(); err != nil {
+					log.Printf("[WARN] failed to close rows: %v", err)
+				}
 			}
 			time.Sleep(interval)
 		}
@@ -62,14 +64,18 @@ func getConfigValue(db *sql.DB, key, defaultValue string) string {
 	value, err := gosaledb.GetConfig(db, key)
 	if err == nil && value != "" {
 		// If found in DB, set to env for consistency and return
-		os.Setenv(key, value)
+		if err := os.Setenv(key, value); err != nil {
+			log.Printf("[ERROR] Could not set environment variable %s: %v", key, err)
+		}
 		return value
 	}
 
 	// 3. Use default value
 	if defaultValue != "" {
 		// If default value is provided, set it in env and DB
-		os.Setenv(key, defaultValue)
+		if err := os.Setenv(key, defaultValue); err != nil {
+			log.Printf("[WARN] Failed to set default env for key %s: %v", key, err)
+		}
 		if err := gosaledb.SetConfig(db, key, defaultValue); err != nil {
 			log.Printf("Failed to set default config for key %s to DB: %v", key, err)
 		}
@@ -91,8 +97,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to enable foreign keys: %v", err)
 	}
-	defer db.Close()
-
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("[ERROR] Failed to close database: %v", err)
+		}
+	}()
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS posts (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	user_id INTEGER NOT NULL,
@@ -209,7 +218,9 @@ func main() {
 						Text:            response,
 						ReplyParameters: &models.ReplyParameters{MessageID: update.Message.ID},
 					}
-					b.SendMessage(ctx, msg)
+					if _, err := b.SendMessage(ctx, msg); err != nil {
+						log.Printf("[ERROR] Failed to send message to user: %v", err)
+					}
 					return
 				}
 
@@ -220,7 +231,9 @@ func main() {
 						Text:            response,
 						ReplyParameters: &models.ReplyParameters{MessageID: update.Message.ID},
 					}
-					b.SendMessage(ctx, msg)
+					if _, err := b.SendMessage(ctx, msg); err != nil {
+						log.Printf("[ERROR] Failed to send message to user: %v", err)
+					}
 					return
 				}
 				lang := os.Getenv("LANG")
@@ -247,7 +260,9 @@ func main() {
 						ReplyMarkup:     markup,
 						ReplyParameters: &models.ReplyParameters{MessageID: update.Message.ID},
 					}
-					b.SendMessage(ctx, msg)
+					if _, err := b.SendMessage(ctx, msg); err != nil {
+						log.Printf("[ERROR] Failed to send message to user: %v", err)
+					}
 					return
 				}
 				msg := &bot.SendMessageParams{

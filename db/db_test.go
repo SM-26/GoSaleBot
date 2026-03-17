@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"log"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -55,8 +56,11 @@ func setupTestDB(t *testing.T) *sql.DB {
 
 func TestSetConfig(t *testing.T) {
 	db := setupTestDB(t)
-	defer db.Close()
-
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("Error closing database: %v", err)
+		}
+	}()
 	err := SetConfig(db, "test_key", "test_value")
 	if err != nil {
 		t.Fatalf("SetConfig failed: %v", err)
@@ -75,8 +79,11 @@ func TestSetConfig(t *testing.T) {
 
 func TestGetConfig(t *testing.T) {
 	db := setupTestDB(t)
-	defer db.Close()
-
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("Error closing database: %v", err)
+		}
+	}()
 	_, err := db.Exec("INSERT INTO config (key, value) VALUES ('test_key', 'test_value')")
 	if err != nil {
 		t.Fatalf("Failed to insert test data: %v", err)
@@ -94,8 +101,11 @@ func TestGetConfig(t *testing.T) {
 
 func TestSavePhotoToDB(t *testing.T) {
 	db := setupTestDB(t)
-	defer db.Close()
-
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("Error closing database: %v", err)
+		}
+	}()
 	err := SavePhotoToDB(db, 1, "file123")
 	if err != nil {
 		t.Fatalf("SavePhotoToDB failed: %v", err)
@@ -114,16 +124,20 @@ func TestSavePhotoToDB(t *testing.T) {
 
 func TestSavePostToDB(t *testing.T) {
 	db := setupTestDB(t)
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("Error closing database: %v", err)
+		}
+	}()
 
 	post := Post{
 		UserID:      9876,
-		ChatID:      int64(12345),
-		MessageID:   54321,
+		ChatID:      sql.NullInt64{Int64: 12345, Valid: true},
+		MessageID:   sql.NullInt64{Int64: 54321, Valid: true},
 		Title:       "Test Title",
-		Description: "Test Description",
-		Price:       "100",
-		Location:    "Test Location",
+		Description: sql.NullString{String: "Test Description", Valid: true},
+		Price:       sql.NullString{String: "100", Valid: true},
+		Location:    sql.NullString{String: "Test Location", Valid: true},
 		Photos:      []string{"file1", "file2"},
 	}
 

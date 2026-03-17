@@ -9,6 +9,7 @@ import (
 	"gosalebot/i18n"
 	"log"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -233,12 +234,12 @@ func savePost(dbConn *sql.DB, session *fsm.UserSession, chatID, messageID int64)
 	}
 	post = db.Post{
 		UserID:      session.UserID,
-		ChatID:      chatID,
-		MessageID:   int(messageID),
+		ChatID:      sql.NullInt64{Int64: chatID, Valid: true},
+		MessageID:   sql.NullInt64{Int64: messageID, Valid: true},
 		Title:       session.Draft.Title,
-		Description: session.Draft.Description,
-		Price:       session.Draft.Price,
-		Location:    session.Draft.Location,
+		Description: sql.NullString{String: session.Draft.Description, Valid: session.Draft.Description != ""},
+		Price:       sql.NullString{String: session.Draft.Price, Valid: session.Draft.Price != ""},
+		Location:    sql.NullString{String: session.Draft.Location, Valid: session.Draft.Location != ""},
 		Photos:      session.Draft.Photos,
 	}
 	postID, err := db.SavePostToDB(dbConn, post)
@@ -364,35 +365,23 @@ func updateModerationPhotoMessageIDs(dbConn *sql.DB, postID int64, messageIDs []
 
 // ApprovePost publishes a post to the approved group and deletes the moderation message.
 func ApprovePost(dbConn *sql.DB, moderationMsg *models.Message, approvedGroupID int64, approvedTopicID int, postID int64) error {
-	var userID int64
-	var title, description, price, location, status string
-	var moderationPhotoMessageIDsStr sql.NullString
-	row := dbConn.QueryRow("SELECT user_id, title, description, price, location, status, moderation_photo_message_ids FROM posts WHERE id = ?", postID)
-	err := row.Scan(&userID, &title, &description, &price, &location, &status, &moderationPhotoMessageIDsStr)
+	post, err := db.GetPost(dbConn, postID)
 	if err != nil {
 		log.Printf("[ERROR] ApprovePost: failed to find post for id %d: %v", postID, err)
 		return err
 	}
 
-	if status != StatusPending {
-		log.Printf("[INFO] ApprovePost: post %d is not pending (status: %s), skipping approval.", postID, status)
+	if post.Status != StatusPending {
+		log.Printf("[INFO] ApprovePost: post %d is not pending (status: %s), skipping approval.", postID, post.Status)
 		return nil
 	}
 
-	// Fetch all photo file_ids for the post BEFORE deleting them
-
-	rows, err := dbConn.Query("SELECT file_id FROM photos WHERE post_id = ?", postID)
-	var photoFileIDs []string
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var fileID string
-			if err := rows.Scan(&fileID); err == nil {
-				photoFileIDs = append(photoFileIDs, fileID)
-			}
-		}
-	} else {
-		log.Printf("[ERROR] ApprovePost: failed to query photos for post %d: %v", postID, err)
+	var moderationPhotoMessageIDsStr sql.NullString
+	row := dbConn.QueryRow("SELECT moderation_photo_message_ids FROM posts WHERE id = ?", postID)
+	err = row.Scan(&moderationPhotoMessageIDsStr)
+	if err != nil && err != sql.ErrNoRows {
+		log.Printf("[WARNING] ApprovePost: failed to get moderation_photo_message_ids for post %d: %v", postID, err)
+		// continue anyway
 	}
 
 	lang := os.Getenv("LANG")
@@ -401,23 +390,33 @@ func ApprovePost(dbConn *sql.DB, moderationMsg *models.Message, approvedGroupID 
 	}
 	// Find the username from the DB
 	var username string
-	row = dbConn.QueryRow("SELECT username FROM users WHERE id = ?", userID)
+	row = dbConn.QueryRow("SELECT username FROM users WHERE id = ?", post.UserID)
 	err = row.Scan(&username)
 	if err != nil {
-		log.Printf("[WARNING] ApprovePost: failed to find username for userID '%d': %v", userID, err)
+		log.Printf("[WARNING] ApprovePost: failed to find username for userID '%d': %v", post.UserID, err)
 	}
-	title = escapeHTML(title)
-	description = escapeHTML(description)
-	price = escapeHTML(price)
-	location = escapeHTML(location)
-	postedBy := formatPostedBy(username, userID)
+	title := escapeHTML(post.Title)
+	var description string
+	if post.Description.Valid {
+		description = escapeHTML(post.Description.String)
+	}
+	var price string
+	if post.Price.Valid {
+		price = escapeHTML(post.Price.String)
+	}
+	var location string
+	if post.Location.Valid {
+		location = escapeHTML(post.Location.String)
+	}
+
+	postedBy := formatPostedBy(username, post.UserID)
 	msgText := i18n.T(lang, "for_sale", title, description, price, location, postedBy)
 
 	ctx := context.Background()
-	if len(photoFileIDs) > 0 {
+	if len(post.Photos) > 0 {
 		// Send as media group (album)
 		var mediaGroup []models.InputMedia
-		for i, fileID := range photoFileIDs {
+		for i, fileID := range post.Photos {
 			media := &models.InputMediaPhoto{
 				Media: fileID,
 			}
@@ -469,12 +468,12 @@ func ApprovePost(dbConn *sql.DB, moderationMsg *models.Message, approvedGroupID 
 	// Notify the user that their post was approved
 	notifyText := i18n.T(lang, "post_approved")
 	notifyReq := &telegram.SendMessageParams{
-		ChatID: userID,
+		ChatID: post.UserID,
 		Text:   notifyText,
 	}
 	_, notifyErr := globalBotInstance.SendMessage(ctx, notifyReq)
 	if notifyErr != nil {
-		log.Printf("[WARNING] ApprovePost: failed to notify user %d: %v", userID, notifyErr)
+		log.Printf("[WARNING] ApprovePost: failed to notify user %d: %v", post.UserID, notifyErr)
 	}
 	// Delete moderation message
 	deleteReq := &telegram.DeleteMessageParams{
@@ -751,14 +750,10 @@ func HandleCallbackQuery(db *sql.DB, update models.Update, botAPI *telegram.Bot,
 }
 
 // Add these helpers at the end of the file:
+var safeUsernameRegex = regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 
 func isSafeUsername(username string) bool {
-	for _, r := range username {
-		if !(r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
-			return false
-		}
-	}
-	return true
+	return safeUsernameRegex.MatchString(username)
 }
 
 func GetHelpMessage(userID int64) string {
@@ -792,7 +787,11 @@ func HandleMyPosts(dbConn *sql.DB, userID int64, lang string) string {
 	if err != nil {
 		return i18n.T(lang, "failed_clear_posts", err.Error())
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("[WARN] failed to close rows: %v", err)
+		}
+	}()
 	var out strings.Builder
 	out.WriteString(i18n.T(lang, "your_posts_header"))
 	found := false

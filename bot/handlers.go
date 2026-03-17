@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"database/sql"
 	"gosalebot/db"
 	"gosalebot/fsm"
 	"gosalebot/i18n"
@@ -88,12 +89,12 @@ func HandlePhotosStatePure(session *fsm.UserSession, update models.Update, lang,
 
 		post := db.Post{
 			UserID:      session.UserID,
-			ChatID:      0, // caller/executor will pass proper chat/message IDs if needed
-			MessageID:   0,
+			ChatID:      sql.NullInt64{Valid: false},
+			MessageID:   sql.NullInt64{Valid: false},
 			Title:       title,
-			Description: description,
-			Price:       price,
-			Location:    location,
+			Description: sql.NullString{String: description, Valid: description != ""},
+			Price:       sql.NullString{String: price, Valid: price != ""},
+			Location:    sql.NullString{String: location, Valid: location != ""},
 			Photos:      photos,
 		}
 		next := fsm.StateIdle

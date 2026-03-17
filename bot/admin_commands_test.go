@@ -2,7 +2,9 @@ package bot
 
 import (
 	"database/sql"
+	"log"
 	"os"
+	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -28,15 +30,14 @@ func newAdminTestDB(t *testing.T) *sql.DB {
 
 func TestAdminShowAndClearDB(t *testing.T) {
 	db := newAdminTestDB(t)
-	defer db.Close()
-
+	defer func() { _ = db.Close() }()
 	// insert sample data
 	_, _ = db.Exec(`INSERT INTO users (id, username) VALUES (1, 'u1')`)
 	_, _ = db.Exec(`INSERT INTO posts (id, user_id, status, title) VALUES (1, 1, 'pending', 'T1')`)
 	_, _ = db.Exec(`INSERT INTO photos (id, post_id, file_id) VALUES (1, 1, 'f1')`)
 	_, _ = db.Exec(`INSERT INTO config (key, value) VALUES ('K','V')`)
 
-	os.Setenv("ADMINS", "42")
+	_ = os.Setenv("ADMINS", "42")
 	LoadAdminsFromEnv()
 
 	// showdb
@@ -57,15 +58,45 @@ func TestAdminShowAndClearDB(t *testing.T) {
 	}
 }
 
+func TestAdminConfig(t *testing.T) {
+	db := newAdminTestDB(t)
+	defer func() { _ = db.Close() }()
+
+	_ = os.Setenv("ADMINS", "99")
+	LoadAdminsFromEnv()
+
+	// Set a config value
+	resp := HandleAdminCommand(db, 99, "/config MY_KEY my_value", "admin")
+	if resp == "" {
+		t.Fatalf("Expected response from setting config")
+	}
+
+	// Verify it was set
+	var val string
+	err := db.QueryRow("SELECT value FROM config WHERE key = 'MY_KEY'").Scan(&val)
+	if err != nil || val != "my_value" {
+		t.Fatalf("Expected to read 'my_value' from DB, got '%s' (err: %v)", val, err)
+	}
+
+	// List config and check if it's present
+	resp = HandleAdminCommand(db, 99, "/config", "admin")
+	if !strings.Contains(resp, "MY_KEY = my_value") {
+		t.Fatalf("Expected '/config' list to contain the new key, but it didn't. Got: %s", resp)
+	}
+}
+
 func TestAdminPendingApproveReject(t *testing.T) {
 	db := newAdminTestDB(t)
-	defer db.Close()
-
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("Error closing database: %v", err)
+		}
+	}()
 	// insert a pending post
 	_, _ = db.Exec(`INSERT INTO users (id, username) VALUES (10, 'u10')`)
 	_, _ = db.Exec(`INSERT INTO posts (id, user_id, status, title, description, price, location) VALUES (5, 10, 'pending', 'T5', 'D', '100', 'L')`)
 
-	os.Setenv("ADMINS", "99")
+	_ = os.Setenv("ADMINS", "99")
 	LoadAdminsFromEnv()
 
 	// approve

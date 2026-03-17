@@ -7,7 +7,7 @@ import (
 )
 
 func TestIsAdmin(t *testing.T) {
-	os.Setenv("ADMINS", "123,456, 789")
+	_ = os.Setenv("ADMINS", "123,456, 789")
 	LoadAdminsFromEnv()
 
 	if !IsAdmin(123) {
@@ -49,7 +49,7 @@ func TestGetHelpMessage(t *testing.T) {
 	}
 
 	// Test for admin user
-	os.Setenv("ADMINS", "123")
+	_ = os.Setenv("ADMINS", "123")
 	LoadAdminsFromEnv()
 	helpMessage = GetHelpMessage(123)
 	if !strings.Contains(helpMessage, "Admin commands") {

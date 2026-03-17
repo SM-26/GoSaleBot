@@ -3,6 +3,7 @@ package bot
 import (
 	"database/sql"
 	"gosalebot/fsm"
+	"log"
 	"testing"
 
 	"github.com/go-telegram/bot/models"
@@ -39,7 +40,11 @@ func TestValidatePhotos(t *testing.T) {
 // Integration: dispatcher should reject invalid price when user is in StatePrice
 func TestDispatcherRejectsInvalidPrice(t *testing.T) {
 	db := newTestDB(t)
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("[WARN] failed to close rows: %v", err)
+		}
+	}()
 
 	// create session and set state to price
 	session := &fsm.UserSession{UserID: 999, State: fsm.StatePrice, Draft: &fsm.PostDraft{}}

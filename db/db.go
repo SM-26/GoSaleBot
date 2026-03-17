@@ -9,14 +9,56 @@ import (
 
 // Post represents a sale post to be persisted.
 type Post struct {
+	ID          int64
 	UserID      int64
-	ChatID      int64
-	MessageID   int
+	ChatID      sql.NullInt64
+	MessageID   sql.NullInt64
+	Status      string
 	Title       string
-	Description string
-	Price       string
-	Location    string
+	Description sql.NullString
+	Price       sql.NullString
+	Location    sql.NullString
 	Photos      []string
+}
+
+func GetPost(db *sql.DB, id int64) (*Post, error) {
+	row := db.QueryRow("SELECT id, user_id, chat_id, message_id, status, title, description, price, location FROM posts WHERE id = ?", id)
+	post := &Post{}
+	err := row.Scan(
+		&post.ID,
+		&post.UserID,
+		&post.ChatID,
+		&post.MessageID,
+		&post.Status,
+		&post.Title,
+		&post.Description,
+		&post.Price,
+		&post.Location,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// now load photos
+	rows, err := db.Query("SELECT file_id FROM photos WHERE post_id = ?", id)
+	if err != nil {
+		// If no photos, it's not a critical error for GetPost
+		log.Printf("[WARNING] GetPost couldn't query photos for post %d: %v", id, err)
+		return post, nil
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("[WARN] failed to close rows: %v", err)
+		}
+	}()
+	for rows.Next() {
+		var fileID string
+		if err := rows.Scan(&fileID); err == nil {
+			post.Photos = append(post.Photos, fileID)
+		}
+	}
+
+	return post, nil
 }
 
 func SavePhotoToDB(db *sql.DB, postID int64, fileID string) error {
@@ -24,7 +66,11 @@ func SavePhotoToDB(db *sql.DB, postID int64, fileID string) error {
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() {
+		if closeErr := stmt.Close(); closeErr != nil {
+			log.Printf("[WARN] failed to close statement in SavePhotoToDB: %v", closeErr)
+		}
+	}()
 	_, err = stmt.Exec(postID, fileID)
 	return err
 }
@@ -35,8 +81,11 @@ func SavePostToDB(db *sql.DB, post Post) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer stmt.Close()
-
+	defer func() {
+		if err := stmt.Close(); err != nil {
+			log.Printf("[WARN] failed to close statement: %v", err)
+		}
+	}()
 	res, err := stmt.Exec(
 		post.UserID,
 		post.ChatID,
