@@ -22,6 +22,25 @@ const (
 	StatusRejected = "rejected"
 )
 
+// escapeMarkdown escapes Markdown special characters including [ and ] for safe use in Telegram Markdown
+func escapeMarkdown(text string) string {
+	text = strings.ReplaceAll(text, "\\", "\\\\")
+	text = strings.ReplaceAll(text, "*", "\\*")
+	text = strings.ReplaceAll(text, "_", "\\_")
+	text = strings.ReplaceAll(text, "`", "\\`")
+	text = strings.ReplaceAll(text, "[", "\\[")
+	text = strings.ReplaceAll(text, "]", "\\]")
+	return text
+}
+
+// escapeHTML escapes HTML special characters for safe use in Telegram HTML
+func escapeHTML(text string) string {
+	text = strings.ReplaceAll(text, "&", "&amp;")
+	text = strings.ReplaceAll(text, "<", "&lt;")
+	text = strings.ReplaceAll(text, ">", "&gt;")
+	return text
+}
+
 // globalBotInstance is set at startup in main.go for admin command use
 var globalBotInstance *telegram.Bot
 var adminIDs map[int64]struct{}
@@ -116,9 +135,17 @@ func handleRejectViaReply(dbConn *sql.DB, msg *models.Message, moderationGroupID
 			err := RejectPost(dbConn, msg.ReplyToMessage, msg.Text, postID)
 			if err != nil {
 				log.Printf("[ERROR] Failed to reject post %d via reply: %v", postID, err)
-				return "Failed to reject post."
+				lang := os.Getenv("LANG")
+				if lang == "" {
+					lang = "en"
+				}
+				return i18n.T(lang, "failed_reject_post")
 			}
-			return "Post rejected with custom reason."
+			lang := os.Getenv("LANG")
+			if lang == "" {
+				lang = "en"
+			}
+			return i18n.T(lang, "post_rejected_custom")
 		}
 	}
 	return ""
@@ -174,11 +201,12 @@ func handleIdleState(dbConn *sql.DB, session *fsm.UserSession, msg *models.Messa
 			if err != nil {
 				return i18n.T(lang, "invalid_myposts_usage")
 			}
-			if action == "delete" {
+			switch action {
+			case "delete":
 				ok, msgText := deletePost(dbConn, session.UserID, id, lang)
 				_ = ok
 				return msgText
-			} else if action == "sold" || action == "mark_sold" {
+			case "sold", "mark_sold":
 				ok, msgText := markPostSold(dbConn, session.UserID, id, lang)
 				_ = ok
 				return msgText
@@ -335,7 +363,7 @@ func updateModerationPhotoMessageIDs(dbConn *sql.DB, postID int64, messageIDs []
 }
 
 // ApprovePost publishes a post to the approved group and deletes the moderation message.
-func ApprovePost(dbConn *sql.DB, moderationMsg *models.Message, approvedGroupID int64, postID int64) error {
+func ApprovePost(dbConn *sql.DB, moderationMsg *models.Message, approvedGroupID int64, approvedTopicID int, postID int64) error {
 	var userID int64
 	var title, description, price, location, status string
 	var moderationPhotoMessageIDsStr sql.NullString
@@ -378,10 +406,10 @@ func ApprovePost(dbConn *sql.DB, moderationMsg *models.Message, approvedGroupID 
 	if err != nil {
 		log.Printf("[WARNING] ApprovePost: failed to find username for userID '%d': %v", userID, err)
 	}
-	title = telegram.EscapeMarkdown(title)
-	description = telegram.EscapeMarkdown(description)
-	price = telegram.EscapeMarkdown(price)
-	location = telegram.EscapeMarkdown(location)
+	title = escapeHTML(title)
+	description = escapeHTML(description)
+	price = escapeHTML(price)
+	location = escapeHTML(location)
 	postedBy := formatPostedBy(username, userID)
 	msgText := i18n.T(lang, "for_sale", title, description, price, location, postedBy)
 
@@ -395,13 +423,16 @@ func ApprovePost(dbConn *sql.DB, moderationMsg *models.Message, approvedGroupID 
 			}
 			if i == 0 {
 				media.Caption = msgText
-				media.ParseMode = "Markdown"
+				media.ParseMode = "HTML"
 			}
 			mediaGroup = append(mediaGroup, media)
 		}
 		mediaReq := &telegram.SendMediaGroupParams{
 			ChatID: approvedGroupID,
 			Media:  mediaGroup,
+		}
+		if approvedTopicID != 0 {
+			mediaReq.MessageThreadID = approvedTopicID
 		}
 		_, err = globalBotInstance.SendMediaGroup(ctx, mediaReq)
 		if err != nil {
@@ -411,7 +442,10 @@ func ApprovePost(dbConn *sql.DB, moderationMsg *models.Message, approvedGroupID 
 		msgReq := &telegram.SendMessageParams{
 			ChatID:    approvedGroupID,
 			Text:      msgText,
-			ParseMode: "Markdown",
+			ParseMode: "HTML",
+		}
+		if approvedTopicID != 0 {
+			msgReq.MessageThreadID = approvedTopicID
 		}
 		_, err = globalBotInstance.SendMessage(ctx, msgReq)
 		if err != nil {
@@ -453,9 +487,12 @@ func ApprovePost(dbConn *sql.DB, moderationMsg *models.Message, approvedGroupID 
 	}
 
 	// Delete all moderation group images for this post
-	if moderationPhotoMessageIDsStr.Valid {
+	if moderationPhotoMessageIDsStr.Valid && moderationPhotoMessageIDsStr.String != "" {
 		moderationImageMsgIDs := strings.Split(moderationPhotoMessageIDsStr.String, ",")
 		for _, msgIDStr := range moderationImageMsgIDs {
+			if msgIDStr == "" {
+				continue
+			}
 			msgID, err := strconv.Atoi(msgIDStr)
 			if err != nil {
 				log.Printf("[WARNING] ApprovePost: failed to parse moderation image message ID '%s': %v", msgIDStr, err)
@@ -480,11 +517,15 @@ func ApprovePost(dbConn *sql.DB, moderationMsg *models.Message, approvedGroupID 
 func formatPostedBy(username string, userID int64) string {
 	if username != "" {
 		if isSafeUsername(username) {
-			return "@" + username
+			return "@" + escapeHTML(username)
 		}
-		return telegram.EscapeMarkdown(username)
+		return escapeHTML(username)
 	}
-	return fmt.Sprintf("[user](tg://user?id=%d)", userID)
+	lang := os.Getenv("LANG")
+	if lang == "" {
+		lang = "en"
+	}
+	return fmt.Sprintf("<a href=\"tg://user?id=%d\">%s</a>", userID, i18n.T(lang, "user_link_text"))
 }
 
 func RejectPost(dbConn *sql.DB, moderationMsg *models.Message, replyText string, postID int64) error {
@@ -615,7 +656,7 @@ func HandleAdminCommand(dbConn *sql.DB, userID int64, text string, username stri
 
 }
 
-func HandleCallbackQuery(db *sql.DB, update models.Update, botAPI *telegram.Bot, approvedGroupID int64) {
+func HandleCallbackQuery(db *sql.DB, update models.Update, botAPI *telegram.Bot, approvedGroupID int64, approvedTopicID int) {
 	if update.CallbackQuery != nil {
 		data := update.CallbackQuery.Data
 		lang := os.Getenv("LANG")
@@ -641,14 +682,15 @@ func HandleCallbackQuery(db *sql.DB, update models.Update, botAPI *telegram.Bot,
 				return
 			}
 
-			if action == "approve" {
+			switch action {
+			case "approve":
 				log.Printf("[INFO] Admin %d approved post %d via inline button", userID, postID)
-				err := ApprovePost(db, msg, approvedGroupID, postID)
+				err := ApprovePost(db, msg, approvedGroupID, approvedTopicID, postID)
 				if err != nil {
 					log.Printf("[ERROR] Failed to approve post %d: %v", postID, err)
 				}
 				return
-			} else if action == "reject" {
+			case "reject":
 				log.Printf("[INFO] Admin %d rejected post %d via inline button", userID, postID)
 				err := RejectPost(db, msg, "Rejected by admin", postID)
 				if err != nil {
@@ -720,22 +762,26 @@ func isSafeUsername(username string) bool {
 }
 
 func GetHelpMessage(userID int64) string {
-	helpMessage := "Available commands:\n" +
-		"/start - Start a new sale post\n" +
-		"/help - Show this help message"
-
-	if IsAdmin(userID) {
-		helpMessage += "\n\nAdmin commands:\n" +
-			"/config <key> <value> - Set a config value\n" +
-			"/config - Show all config values\n" +
-			"/pending - List pending posts\n" +
-			"/showdb - Show all tables in the database\n" +
-			"/cleardb - Clear all posts and photos from the database"
+	lang := os.Getenv("LANG")
+	if lang == "" {
+		lang = "en"
 	}
 
-	// user listing
-	helpMessage += "\n\nUser commands:\n" +
-		"/myposts - List your posts and their status"
+	helpMessage := i18n.T(lang, "help_available_commands") + "\n" +
+		i18n.T(lang, "help_cmd_start") + "\n" +
+		i18n.T(lang, "help_cmd_help")
+
+	if IsAdmin(userID) {
+		helpMessage += "\n\n" + i18n.T(lang, "help_admin_commands") + "\n" +
+			i18n.T(lang, "help_cmd_config_set") + "\n" +
+			i18n.T(lang, "help_cmd_config_list") + "\n" +
+			i18n.T(lang, "help_cmd_pending") + "\n" +
+			i18n.T(lang, "help_cmd_showdb") + "\n" +
+			i18n.T(lang, "help_cmd_cleardb")
+	}
+
+	helpMessage += "\n\n" + i18n.T(lang, "help_user_commands") + "\n" +
+		i18n.T(lang, "help_cmd_myposts")
 
 	return helpMessage
 }

@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24.6-alpine AS builder
+FROM golang:alpine AS builder
 
 # Update apk and upgrade packages to reduce vulnerabilities
 RUN apk update && apk upgrade --no-cache

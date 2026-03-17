@@ -114,23 +114,17 @@ func AdminHandlers(dbConn *sql.DB, userID int64, lang string) map[string]func(st
 			return i18n.T(lang, "config_usage")
 		}
 		// list config
-		envKeys := []string{
-			"TELEGRAM_TOKEN",
-			"MODERATION_GROUP_ID",
-			"APPROVED_GROUP_ID",
-			"MODERATION_TOPIC_ID",
-			"APPROVED_TOPIC_ID",
-			"LANG",
-			"TIMEOUT_MINUTES",
-			"ADMINS",
-		}
 		var out strings.Builder
-		for _, key := range envKeys {
-			val, err := db.GetConfig(dbConn, key)
-			if err != nil || val == "" {
-				val = os.Getenv(key)
+		rows, err := dbConn.Query("SELECT key, value FROM config ORDER BY key")
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var key, val string
+				rows.Scan(&key, &val)
+				out.WriteString(key + " = " + val + "\n")
 			}
-			out.WriteString(key + " = " + val + "\n")
+		} else {
+			out.WriteString("Failed to query config: " + err.Error())
 		}
 		log.Printf("[INFO] Admin %d listed config", userID)
 		return out.String()
@@ -143,33 +137,39 @@ func AdminHandlers(dbConn *sql.DB, userID int64, lang string) map[string]func(st
 			if len(parts) == 3 && (parts[2] == "approve" || parts[2] == "reject") {
 				postID, err := strconv.ParseInt(parts[1], 10, 64)
 				if err != nil {
-					return "Invalid post ID."
+					return i18n.T(lang, "invalid_post_id")
 				}
 				row := dbConn.QueryRow("SELECT title, user_id FROM posts WHERE id = ? AND status = ?", postID, StatusPending)
 				var title string
 				var userIDVal int64
 				err = row.Scan(&title, &userIDVal)
 				if err != nil {
-					return "No pending post found with that ID."
+					return i18n.T(lang, "no_pending_post_found")
 				}
 
 				if parts[2] == "approve" {
 					approvedGroupID, _ := strconv.ParseInt(os.Getenv("APPROVED_GROUP_ID"), 10, 64)
+					approvedTopicIDStr, _ := db.GetConfig(dbConn, "APPROVED_TOPIC_ID")
+					approvedTopicID, _ := strconv.Atoi(approvedTopicIDStr)
 					row = dbConn.QueryRow("SELECT description, price, location FROM posts WHERE id = ?", postID)
 					var description, price, location string
 					err = row.Scan(&description, &price, &location)
 					if err != nil {
-						return "Failed to fetch post details."
+						return i18n.T(lang, "failed_fetch_post_details")
 					}
 					_, err = dbConn.Exec("UPDATE posts SET status = ? WHERE id = ?", StatusApproved, postID)
 					if err != nil {
-						return "Failed to update post status."
+						return i18n.T(lang, "failed_update_config")
 					}
 					var username string
 					row = dbConn.QueryRow("SELECT username FROM users WHERE id = ?", userIDVal)
 					_ = row.Scan(&username)
 					postedBy := formatPostedBy(username, userIDVal)
-					msgText := telegram.EscapeMarkdown(i18n.T(lang, "for_sale", title, description, price, location, postedBy))
+					title = escapeHTML(title)
+					description = escapeHTML(description)
+					price = escapeHTML(price)
+					location = escapeHTML(location)
+					msgText := i18n.T(lang, "for_sale", title, description, price, location, postedBy)
 					rows, err := dbConn.Query("SELECT file_id FROM photos WHERE post_id = ?", postID)
 					var photoFileIDs []string
 					if err == nil {
@@ -188,23 +188,29 @@ func AdminHandlers(dbConn *sql.DB, userID int64, lang string) map[string]func(st
 							media := &models.InputMediaPhoto{Media: fileID}
 							if i == 0 {
 								media.Caption = msgText
-								media.ParseMode = "Markdown"
+								media.ParseMode = "HTML"
 							}
 							mediaGroup = append(mediaGroup, media)
 						}
 						mediaReq := &telegram.SendMediaGroupParams{ChatID: approvedGroupID, Media: mediaGroup}
+						if approvedTopicID != 0 {
+							mediaReq.MessageThreadID = approvedTopicID
+						}
 						if globalBotInstance != nil {
 							_, err = globalBotInstance.SendMediaGroup(ctx, mediaReq)
 							if err != nil {
-								return "Failed to send approved post (media group)."
+								return i18n.T(lang, "failed_send_approved_media")
 							}
 						}
 					} else {
 						if globalBotInstance != nil {
-							msgReq := &telegram.SendMessageParams{ChatID: approvedGroupID, Text: msgText, ParseMode: "Markdown"}
+							msgReq := &telegram.SendMessageParams{ChatID: approvedGroupID, Text: msgText, ParseMode: "HTML"}
+							if approvedTopicID != 0 {
+								msgReq.MessageThreadID = approvedTopicID
+							}
 							_, err = globalBotInstance.SendMessage(ctx, msgReq)
 							if err != nil {
-								return "Failed to send approved post."
+								return i18n.T(lang, "failed_send_approved")
 							}
 						}
 					}
@@ -213,18 +219,18 @@ func AdminHandlers(dbConn *sql.DB, userID int64, lang string) map[string]func(st
 						notifyReq := &telegram.SendMessageParams{ChatID: userIDVal, Text: notifyText}
 						_, _ = globalBotInstance.SendMessage(ctx, notifyReq)
 					}
-					return "Post approved and published."
+					return i18n.T(lang, "post_approved_published")
 				} else {
 					_, err = dbConn.Exec("UPDATE posts SET status = ? WHERE id = ?", StatusRejected, postID)
 					if err != nil {
-						return "Failed to update post status."
+						return i18n.T(lang, "failed_update_config")
 					}
 					if globalBotInstance != nil {
 						notifyText := i18n.T(lang, "post_rejected", "Rejected by admin")
 						notifyReq := &telegram.SendMessageParams{ChatID: userIDVal, Text: notifyText}
 						_, _ = globalBotInstance.SendMessage(context.Background(), notifyReq)
 					}
-					return "Post rejected."
+					return i18n.T(lang, "post_rejected")
 				}
 			}
 		}
@@ -232,7 +238,7 @@ func AdminHandlers(dbConn *sql.DB, userID int64, lang string) map[string]func(st
 		rows, err := dbConn.Query("SELECT id, user_id, title, created_at FROM posts WHERE status = ?", StatusPending)
 		if err != nil {
 			log.Printf("[ERROR] Failed to query pending posts: %v", err)
-			return "Failed to query pending posts: " + err.Error()
+			return i18n.T(lang, "failed_query_pending", err.Error())
 		}
 		defer rows.Close()
 		var out strings.Builder

@@ -21,6 +21,8 @@ import (
 var (
 	ModerationGroupID int64
 	ApprovedGroupID   int64
+	ModerationTopicID int
+	ApprovedTopicID   int
 )
 
 func startExpirationWorker(db *sql.DB, interval time.Duration) {
@@ -132,6 +134,23 @@ func main() {
 		log.Fatalf("Failed to create users table: %v", err)
 	}
 
+	// Load all config from env to DB
+	configDefaults := map[string]string{
+		"TELEGRAM_TOKEN":      "",
+		"MODERATION_GROUP_ID": "",
+		"APPROVED_GROUP_ID":   "",
+		"MODERATION_TOPIC_ID": "0",
+		"APPROVED_TOPIC_ID":   "0",
+		"LANG":                "en",
+		"TIMEOUT_MINUTES":     "1440",
+		"ADMINS":              "",
+		"VALIDATE_PRICE":      "true",
+		"MIN_PHOTOS":          "1",
+	}
+	for key, defaultValue := range configDefaults {
+		getConfigValue(db, key, defaultValue)
+	}
+
 	telegramToken := getConfigValue(db, "TELEGRAM_TOKEN", "")
 	if telegramToken == "" {
 		log.Fatal("TELEGRAM_TOKEN environment variable is required")
@@ -153,13 +172,21 @@ func main() {
 	}
 
 	moderationTopicStr := getConfigValue(db, "MODERATION_TOPIC_ID", "0")
-	ModerationTopicID, _ := strconv.Atoi(moderationTopicStr)
+	ModerationTopicID, err = strconv.Atoi(moderationTopicStr)
+	if err != nil {
+		log.Printf("[WARNING] Invalid MODERATION_TOPIC_ID '%s', defaulting to 0: %v", moderationTopicStr, err)
+		ModerationTopicID = 0
+	}
 
-	getConfigValue(db, "LANG", "en")
+	approvedTopicStr := getConfigValue(db, "APPROVED_TOPIC_ID", "0")
+	ApprovedTopicID, err = strconv.Atoi(approvedTopicStr)
+	if err != nil {
+		log.Printf("[WARNING] Invalid APPROVED_TOPIC_ID '%s', defaulting to 0: %v", approvedTopicStr, err)
+		ApprovedTopicID = 0
+	}
+
 	timeoutStr := getConfigValue(db, "TIMEOUT_MINUTES", "1440")
 	timeoutMinutes, _ := strconv.Atoi(timeoutStr)
-
-	getConfigValue(db, "ADMINS", "")
 
 	log.Printf("Config loaded: MODERATION_GROUP_ID=%s, APPROVED_GROUP_ID=%s, TIMEOUT_MINUTES=%d", modGroupStr, approvedGroupStr, timeoutMinutes)
 
@@ -167,7 +194,7 @@ func main() {
 		bot.WithDefaultHandler(func(ctx context.Context, b *bot.Bot, update *models.Update) {
 			// Handle callback queries in the default handler
 			if update.CallbackQuery != nil {
-				gosalebot.HandleCallbackQuery(db, *update, b, ApprovedGroupID)
+				gosalebot.HandleCallbackQuery(db, *update, b, ApprovedGroupID, ApprovedTopicID)
 				return
 			}
 			if update.Message != nil && update.Message.From != nil {

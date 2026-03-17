@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## Version History
 
+- 0.3.2 - Improved config management: dynamic /config command, centralized config loading with defaults, added APPROVED_TOPIC_ID support, switched to HTML parsing for captions to fix entity errors, enhanced user handling without username using first/last names, added warnings for invalid topic IDs, update to go 1.26 (from 1.22)
 - 0.3.1 - User-facing improvement: added `/myposts` command with interactive actions to list, delete, and mark posts as sold. Updated docs and i18n strings; tests added for the new flows.
 - 0.3.0 - Major internal refactor: extracted per-state pure handlers and centralized executor, migrated session/post data to typed `PostDraft`/`db.Post`, added pluggable validators (price, photos) controlled by config, and consolidated admin commands. All unit tests updated and passing.
 - 0.2.4 - Refactored configuration loading, improved error handling, used constants for post status, and updated documentation.

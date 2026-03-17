@@ -24,15 +24,15 @@ func (m *mockTelegramHttpClient) Do(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-type mockRoundTripper struct{}
+// type mockRoundTripper struct{}
 
-func (m *mockRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
-	// Return a dummy response
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Body:       http.NoBody,
-	}, nil
-}
+// func (m *mockRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+// 	// Return a dummy response
+// 	return &http.Response{
+// 		StatusCode: http.StatusOK,
+// 		Body:       http.NoBody,
+// 	}, nil
+// }
 
 func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
