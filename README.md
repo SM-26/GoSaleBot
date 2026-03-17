@@ -5,9 +5,9 @@
 
 
 ---
-
-![GoSaleBot Banner](https://placehold.co/600x150?text=GoSaleBot)
-
+<p align="center">
+  <img src="./docs/GoSaleBot_Banner.png" alt="GoSaleBot Banner">
+</p>
 A modular, production-ready Telegram bot for handling sale posts with moderation, photo support, i18n, admin commands, and full Docker deployment.
 
 ---
